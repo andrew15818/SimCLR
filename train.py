@@ -1,0 +1,141 @@
+import torch
+import torch.optim as optim
+import torchvision.models as models
+import torchvision.datasets as datasets
+import matplotlib.pyplot as plt
+from torch.utils.data import Dataset, DataLoader
+
+import os
+import argparse
+import data
+from model import SimCLR
+from criterion import nt_xent
+from utils import *
+
+model_names = sorted(name for name in models.__dict__
+        if name.islower() and not name.startswith("__") and
+        callable(models.__dict__[name]))
+
+parser =  argparse.ArgumentParser()
+parser.add_argument('--arch', type=str, default='resnet18', help='encoder architecture.')
+parser.add_argument('--lr', type=float, default=0.5, help='initial lr')
+parser.add_argument('--batch-size', type=int, default=256, help='batch size')
+parser.add_argument('--data-dir', type=str, default='../../cvdl2022', help='path to the dataset')
+parser.add_argument('--dataset', type=str, default='cifar10', help='Name of the dataset to use.')
+parser.add_argument('--balanced', action='store_true', default=False, 
+        help='Whether to use the balanced version of dataset.')
+parser.add_argument('--encoder_dim', type=int, default=512,
+    help='output of Resnet backbone.')
+parser.add_argument('--proj_hid_dim', type=int, default=128,
+    help='Projector hidden/output layer dim.')
+parser.add_argument('--num-classes', type=int, default=10, help='Used in plotting functions')
+parser.add_argument('--epochs', type=int, default=400, help='Epochs to train the model')
+parser.add_argument('--resume', type=str, default='', help='Resume training from a checkpoint')
+parser.add_argument('--weight-decay', type=float, default=1e-7)
+parser.add_argument('--momentum', type=float, default=0.9)
+parser.add_argument('--temperature', type=float, default=0.5)
+
+
+def train(model, loader, criterion, optimizer, scheduler, args, **kwargs):
+    model.train()
+    lossMeter = AverageMeter('loss')
+    accMeter1 = AverageMeter('Top1')
+    accMeter5 = AverageMeter('Top5')
+    for i, ((x1, x2), targets) in enumerate(loader):
+        x1 = x1.to(args.device)
+        x2 = x2.to(args.device)
+        
+        optimizer.zero_grad()
+        z1 = model(x1)
+        z2 = model(x2)
+        
+        logits, labels = kwargs['info_nce'](z1, z2)
+        loss = criterion(logits, labels)
+        loss.backward()
+        optimizer.step()
+        scheduler.step()
+        lossMeter.update(loss.item())
+        
+        # Get the measurements
+        norms = torch.norm((z1 -z2), p=2, dim=1)
+        kwargs['normMeter'].add_batch_value(norms, targets)
+        top1, top5 = accuracy(logits, labels, topk=(1, 5))
+        accMeter1.update(top1.item(), targets.size(0))
+        accMeter5.update(top5.item(), targets.size(0))
+
+
+        
+        if i % 20 == 0:
+            print(f'Batch [{i+1}/{len(loader)}] Loss: {lossMeter.avg:.4f} Top1: {accMeter1.avg:.4f} Top5: {accMeter5.avg:.4f}')
+    return lossMeter.avg, accMeter1.avg
+
+def test():
+    pass
+
+def update_meters(*args):
+    for meter in args:
+        meter.update()
+
+def main():
+    args = parser.parse_args()
+    args.device = 'cuda' if torch.cuda.is_available() else 'cpu'
+
+    train_augs, test_augs = data.get_transforms()
+    if args.balanced:
+        print('Loading **Balanced** CIFAR10')
+        dataset = data.BalancedCIFAR10
+    else:
+        dataset = data.ImbalanceCIFAR10
+    train_dataset = dataset(
+            args.data_dir, 
+            train=True, 
+            download=True, 
+            transform=train_augs)
+    train_loader = DataLoader(
+            train_dataset, 
+            batch_size=args.batch_size, shuffle=True)
+    test_dataset= datasets.CIFAR10(
+            args.data_dir,
+            train=False,
+            transform=test_augs)
+    model = SimCLR(
+        models.__dict__[args.arch],encoder_dim=args.encoder_dim, 
+        proj_hid_dim=args.proj_hid_dim)
+    model.to(args.device)
+    info_nce = nt_xent(args.temperature)
+    criterion = torch.nn.CrossEntropyLoss()
+    optimizer = optim.Adam(
+            model.parameters(), 
+            lr=args.lr, 
+            weight_decay=args.weight_decay)
+    scheduler = optim.lr_scheduler.CosineAnnealingLR(
+        optimizer, T_max=len(train_loader))
+
+    trainLosses, trainAccs  = [], []
+    normMeter = ClassAverageMeter(args)
+    for epoch in range(args.epochs):
+        loss, acc = train(
+            model, train_loader, 
+            criterion, optimizer, 
+            scheduler, args,
+            normMeter=normMeter,
+            info_nce=info_nce)
+        print(f'Epoch {epoch} Average Loss: {loss:.4f} Top1: {acc:.4f}')
+        trainLosses.append(loss)
+        trainAccs.append(acc)
+
+        # Save model 
+        save_checkpoint({
+            'state_dict': model.state_dict(),
+            'epoch': epoch,
+            'optimizer': optimizer.state_dict(),
+            'arch': args.arch,
+        }, filename='runs/checkpoint.pth.tar')
+        # Update values we're tracking
+        update_meters(normMeter)
+
+        plot(trainLosses)
+        plot(trainAccs,title='Training Accuracies', ylabel='Accuracy', filename='imgs/accuracies.png')
+        plot_by_class(normMeter.get_values(), epoch=epoch)
+if __name__ == '__main__':
+    main()
