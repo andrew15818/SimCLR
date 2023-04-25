@@ -39,6 +39,8 @@ parser.add_argument('--momentum', type=float, default=0.9)
 parser.add_argument('--temperature', type=float, default=0.3)
 
 
+def get_weights(values *args):
+    pass
 def train(model, loader, criterion, optimizer, scheduler, args, **kwargs):
     model.train()
     lossMeter = AverageMeter('loss')
