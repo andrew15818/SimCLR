@@ -4,6 +4,7 @@ import torch.optim as optim
 import torchvision.models as models
 import torchvision.transforms as transforms
 import torchvision.datasets as datasets
+import numpy as np
 
 from torch.utils.data import DataLoader
 from model import SimCLR
@@ -14,10 +15,11 @@ import os
 import argparse
 
 parser = argparse.ArgumentParser()
-parser.add_argument('--data_dir', type=str, default='../../cvdl2022',
+parser.add_argument('--data_dir', type=str, default='../datasets',
     help='Path to the dataset.')
 parser.add_argument('--arch', type=str, default='resnet18', 
     help='backbone architecture')
+parser.add_argument('--dataset_name', type=str, default='cifar10')
 parser.add_argument('--epochs', type=int, default=90, 
     help='Epochs to train a linear classifier on top of the representaitons.')
 parser.add_argument('--lr', type=float, default=3e-4)
@@ -48,32 +50,53 @@ def main():
     device = 'cuda' if torch.cuda.is_available() else 'cpu'
 
     args = parser.parse_args()
-    model  = SimCLR(models.__dict__[args.arch], args.out_dim)
+    if args.arch == 'resnet18':
+        model = models.resnet18(pretrained=False, num_classes=args.num_classes)
+    elif args.arch == 'resnet50':
+        model = models.resnet50(pretrained=False, num_classes=args.num_classes)
     if args.checkpoint != '':
         checkpoint = torch.load('runs/checkpoint.pth.tar')
-        model.load_state_dict(checkpoint['state_dict'])
-    model = model.encoder
-    model.fc= nn.Linear(args.out_dim, args.num_classes)
-    model.to(device)
-
+        state_dict = checkpoint['state_dict']
+    
+    
     # Freeze the parameters except for last linear layer
+    for k in list(state_dict.keys()):
+        if k.startswith('encoder') and not k.startswith('encoder.fc'):
+            state_dict[k[len('encoder.'):]] = state_dict[k]
+        del state_dict[k]
+
+    # Change the first conv layer to be able to load the state_dict
+    model.conv1 = nn.Conv2d(in_channels=3, out_channels=64,
+            kernel_size=3, stride=1)
+    log = model.load_state_dict(state_dict, strict=False)
+    assert log.missing_keys == ['fc.weight', 'fc.bias']
+    # Only train the last layer
     for name, param in model.named_parameters():
-        if 'fc' not in name:
+        if name not in ['fc.weight', 'fc.bias']:
             param.requires_grad = False
-
+    
+    parameters = list(filter(lambda p: p.requires_grad, model.parameters())) 
+    assert len(parameters) == 2
+    model.to(device)
+    print(model)
     # Train, test on balanced datasets
-    train_dataset = datasets.CIFAR10(root=args.data_dir, train=True, transform=transforms.ToTensor())
+    if args.dataset_name == 'cifar10':
+        train_dataset = datasets.CIFAR10(root=args.data_dir, train=True, transform=transforms.ToTensor())
+        test_dataset = datasets.CIFAR10(root=args.data_dir, train=False, transform=transforms.ToTensor())
+    elif args.dataset_name == 'cifar100':
+        train_dataset = datasets.CIFAR100(root=args.data_dir, train=True, transform=transforms.ToTensor())
+        test_dataset = datasets.CIFAR100(root=args.data_dir, train=False, transform=transforms.ToTensor())
     train_loader = DataLoader(train_dataset, shuffle=True, batch_size=args.batch_size)
-
-    test_dataset = datasets.CIFAR10(root=args.data_dir, train=False, transform=transforms.ToTensor())
     test_loader = DataLoader(test_dataset, shuffle=True, batch_size=args.batch_size)
 
-    optimizer = optim.Adam(model.parameters(), lr=args.lr, weight_decay=0.0008)
+    #optimizer = optim.Adam(model.parameters(), lr=args.lr, weight_decay=0.0008)
+    optimizer = optim.SGD(model.parameters(), lr=0.3)
     criterion = torch.nn.CrossEntropyLoss().to(device)
     
     # Just one number since the datasets are balanced and contain equal number of samples/class
     trainClassCounts = len(train_loader.dataset) / args.num_classes
     testClassCounts = len(test_loader.dataset) / args.num_classes
+    print(trainClassCounts, testClassCounts)
     cumClassAccs = defaultdict(list)
     for epoch in range(args.epochs):
         lossMeter = AverageMeter('Loss')
@@ -127,6 +150,29 @@ def main():
         print(f'Epoch {epoch} Train loss: {lossMeter.avg:.4f}  Train Top1: {trainTop1.avg:.4f} \
         Test Top 1: {testTop1.avg:.4f} \
         Test Top5: {testTop5.avg:.4f}')
-        print(f'{sorted(trainClassAccs.items())}')
+        # Print based on category
+        print_category_accs(trainClassAccs, testClassAccs, args)
+        
+    print(f'{sorted(testClassAccs.items(), key=lambda t: t[0])}')
+
+# Order by Many, Medium, Few
+def print_category_accs(trainAccs:dict, testAccs:dict, args):
+    # Collect all the ordered accs into lists for easy index
+    trainValues, testValues = [], []
+    #print('Appending...')
+    # At least one class has 0 acc, fill it in 
+    if len(testAccs.keys()) != args.num_classes:
+        for i in range(args.num_classes):
+            if i not in testAccs:
+                testAccs[i] = 0
+        print(f'Fixed length to {len(list(testAccs.keys()))}')
+    for testid, testAcc in sorted(testAccs.items(), key=lambda t: t[0]):
+        #print(f'{testid}, ', end='')
+        testValues.append(testAcc)
+
+    interval = args.num_classes // 3
+    tv = np.array(testValues)
+    #print(f'Many: 0-{interval} Medium: {interval}:{2*interval+1} Few: {2*interval+1}:{args.num_classes}')
+    print(f'\tMany: {np.mean(tv[0:interval])}, Medium:{np.mean(tv[interval:2*interval+1])}, Few: {np.mean(tv[2*interval+1:])}')
 if __name__ == '__main__':
     main()
