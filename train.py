@@ -1,8 +1,10 @@
 import torch
+import torch.nn as nn
 import torch.optim as optim
 import torchvision.models as models
 import torchvision.datasets as datasets
 import matplotlib.pyplot as plt
+import torch.nn.functional as F
 from torch.utils.data import Dataset, DataLoader
 
 import os
@@ -18,7 +20,7 @@ model_names = sorted(name for name in models.__dict__
 
 parser =  argparse.ArgumentParser()
 parser.add_argument('--arch', type=str, default='resnet18', help='encoder architecture.')
-parser.add_argument('--lr', type=float, default=0.5, help='initial lr')
+parser.add_argument('--lr', type=float, default=0.0003, help='initial lr')
 parser.add_argument('--batch-size', type=int, default=256, help='batch size')
 parser.add_argument('--data-dir', type=str, default='../../cvdl2022', help='path to the dataset')
 parser.add_argument('--dataset', type=str, default='cifar10', help='Name of the dataset to use.')
@@ -28,12 +30,13 @@ parser.add_argument('--encoder_dim', type=int, default=512,
     help='output of Resnet backbone.')
 parser.add_argument('--proj_hid_dim', type=int, default=128,
     help='Projector hidden/output layer dim.')
+parser.add_argument('--optimizer', type=str, default='adam', choices=['adam', 'sgd'])
 parser.add_argument('--num-classes', type=int, default=10, help='Used in plotting functions')
 parser.add_argument('--epochs', type=int, default=400, help='Epochs to train the model')
 parser.add_argument('--resume', type=str, default='', help='Resume training from a checkpoint')
-parser.add_argument('--weight-decay', type=float, default=1e-7)
+parser.add_argument('--weight-decay', type=float, default=1e-4)
 parser.add_argument('--momentum', type=float, default=0.9)
-parser.add_argument('--temperature', type=float, default=0.5)
+parser.add_argument('--temperature', type=float, default=0.3)
 
 
 def train(model, loader, criterion, optimizer, scheduler, args, **kwargs):
@@ -57,8 +60,13 @@ def train(model, loader, criterion, optimizer, scheduler, args, **kwargs):
         lossMeter.update(loss.item())
         
         # Get the measurements
-        norms = torch.norm((z1 -z2), p=2, dim=1)
+        z1norm = F.normalize(z1, dim=1)
+        z2norm = F.normalize(z2, dim=1)
+        norms = torch.norm((z1- z2), p=2, dim=1)
+        sims = F.cosine_similarity(z1, z2, dim=1) # Cosine similarity
         kwargs['normMeter'].add_batch_value(norms, targets)
+
+        kwargs['simMeter'].add_batch_value(sims, targets)
         top1, top5 = accuracy(logits, labels, topk=(1, 5))
         accMeter1.update(top1.item(), targets.size(0))
         accMeter5.update(top5.item(), targets.size(0))
@@ -78,19 +86,23 @@ def update_meters(*args):
 
 def main():
     args = parser.parse_args()
-    args.device = 'cuda' if torch.cuda.is_available() else 'cpu'
+    args.device = 'cuda:1' if torch.cuda.is_available() else 'cpu'
 
     train_augs, test_augs = data.get_transforms()
-    if args.balanced:
-        print('Loading **Balanced** CIFAR10')
-        dataset = data.BalancedCIFAR10
-    else:
-        dataset = data.ImbalanceCIFAR10
+    if args.dataset == 'cifar10':
+        if args.balanced:
+            print('Loading **Balanced** CIFAR10')
+            dataset = data.BalancedCIFAR10
+        else:
+            dataset = data.ImbalanceCIFAR10
+    elif args.dataset == 'cifar100':
+            dataset = data.ImbalanceCIFAR100
     train_dataset = dataset(
             args.data_dir, 
             train=True, 
             download=True, 
             transform=train_augs)
+    print(train_dataset)
     train_loader = DataLoader(
             train_dataset, 
             batch_size=args.batch_size, shuffle=True)
@@ -101,24 +113,39 @@ def main():
     model = SimCLR(
         models.__dict__[args.arch],encoder_dim=args.encoder_dim, 
         proj_hid_dim=args.proj_hid_dim)
+
+    # Replace the first conv layer only for cifar10
+    if args.dataset == 'cifar10' or args.dataset == 'cifar100':
+        model.encoder.conv1 = nn.Conv2d(in_channels=3, out_channels=64, 
+                                kernel_size=3, stride=1)
+        model.avgpool = nn.Identity()
+    
     model.to(args.device)
     info_nce = nt_xent(args.temperature)
     criterion = torch.nn.CrossEntropyLoss()
-    optimizer = optim.Adam(
-            model.parameters(), 
-            lr=args.lr, 
-            weight_decay=args.weight_decay)
+
+    if args.optimizer == 'adam':
+        optimizer = optim.Adam(
+                model.parameters(), 
+                lr=args.lr, 
+                weight_decay=args.weight_decay)
+    elif args.optimizer == 'sgd':
+        optimizer = optim.SGD(
+                model.parameters(), lr=args.lr,
+                weight_decay=args.weight_decay)
     scheduler = optim.lr_scheduler.CosineAnnealingLR(
         optimizer, T_max=len(train_loader))
 
     trainLosses, trainAccs  = [], []
-    normMeter = ClassAverageMeter(args)
+    normMeter = ClassAverageMeter(args, train_dataset.img_num_list)
+    simMeter = ClassAverageMeter(args, train_dataset.img_num_list)
     for epoch in range(args.epochs):
         loss, acc = train(
             model, train_loader, 
             criterion, optimizer, 
             scheduler, args,
             normMeter=normMeter,
+            simMeter=simMeter,
             info_nce=info_nce)
         print(f'Epoch {epoch} Average Loss: {loss:.4f} Top1: {acc:.4f}')
         trainLosses.append(loss)
@@ -132,10 +159,15 @@ def main():
             'arch': args.arch,
         }, filename='runs/checkpoint.pth.tar')
         # Update values we're tracking
-        update_meters(normMeter)
+        update_meters(normMeter, simMeter)
 
         plot(trainLosses)
         plot(trainAccs,title='Training Accuracies', ylabel='Accuracy', filename='imgs/accuracies.png')
-        plot_by_class(normMeter.get_values(), epoch=epoch)
+        plot_category(normMeter.get_values(), ylabel=r'$d_i$', title=f'Norm difference with {args.optimizer}', epoch=epoch, filename='imgs/norm_difference.png')
+        plot_category(simMeter.get_values(), 
+                ylabel='Cosine Similarity', title='Cosine Similarity between corresponding views.', 
+                epoch=epoch,
+                filename='imgs/cosine_sims.png')
+    print(args)
 if __name__ == '__main__':
     main()
