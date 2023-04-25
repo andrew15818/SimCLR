@@ -1,6 +1,7 @@
 import torch
 import matplotlib.pyplot as plt
 from collections import defaultdict
+import numpy as np
 
 
 def save_checkpoint(
@@ -54,11 +55,42 @@ def plot_by_class(norms, epoch=0,
     plt.savefig(f'{filename}')
     plt.close(fig)
 
+# Plot only by Many, Medium, Few
+def plot_category(values, epoch=0,
+                    title='Norms',
+                    xlabel='Epochs',
+                    ylabel='Magnitude',
+                    filename='plot.png'):
+    fig = plt.figure()
+    plt.title(title)
+    plt.xlabel(xlabel)
+    plt.ylabel(ylabel)
+     # Just split into thirds
+    class_num = len(list(values.keys()))
+    interval = class_num // 3
+    categories = {'Many': [0,interval],
+                  'Medium': [interval, 2*interval +1],
+                  'Few': [2*interval+1, class_num-1]}
+
+    # Group by  class indices into Many, Medium, Few
+    for category, classids in categories.items():
+        start, end = classids
+        avg = np.zeros((epoch+1))
+        for i in range(start, end):
+            avg += np.array(values[i])
+        avg /= (end - start)
+        plt.plot(avg, label=category)
+
+    plt.legend()
+    plt.savefig(f'{filename}')
+    plt.close(fig)
+
 def plot_class_and_category(values, epoch=0,
-                                title='Percentage of Class Samples Chosen for Interpolation',
+                                title='Norms',
                                 xlabel='Epoch',
-                                ylabel='Percentage',
-                                filename='plot.png'):
+                                ylabel='Magnitude',
+                                filename='plot.png',
+                                useLegend=True):
     fig, axes = plt.subplots(nrows=2, ncols=1, sharex=True)
     fig.suptitle(title)
     plt.title(title) 
@@ -67,13 +99,16 @@ def plot_class_and_category(values, epoch=0,
         axes[0].plot(v, label=classid)
 
     # Place the legend on top to avoid it blocking the curves 
-    axes[0].legend(loc='upper center', bbox_to_anchor=(0.5, 1.05), ncol=5)
+    if useLegend:
+        axes[0].legend(loc='upper center', bbox_to_anchor=(0.5, 1.05), ncol=5)
     axes[0].set_title('By class')
 
-    # CIFAR10 categories only
-    categories = {'Many': [1, 4],
-                  'Medium': [4, 8],
-                  'Few': [7, 10]}
+    # Just split into thirds
+    class_num = len(list(values.keys()))
+    interval = class_num // 3
+    categories = {'Many': [0,interval],
+                  'Medium': [interval, 2*interval +1],
+                  'Few': [2*interval+1, class_num]}
 
     # Group by  class indices into Many, Medium, Few
     for category, classids in categories.items():
@@ -86,8 +121,21 @@ def plot_class_and_category(values, epoch=0,
 
     axes[1].set_title('By category') 
     axes[1].legend()
-    plt.savefig(f'{filename}.png')
+    plt.savefig(f'{filename}')
     plt.close(fig)
+
+
+# Mahalanobis distance between projection matrices
+def mahalanobis_distance(z1, z2, eps=1e-6):
+    # Covariance matrix of z1
+    inv_cov = torch.inverse(torch.cov(z1))
+    
+    # Mean difference between projections
+    mean_diff = z1 - z2
+    dist = torch.sqrt(torch.sum(torch.matmul(mean_diff.T, inv_cov)*mean_diff.T, dim=1))
+    print(dist)
+    return dist
+
 
 class AverageMeter(object):
     """Computes and stores the average and current value"""
@@ -115,35 +163,31 @@ class AverageMeter(object):
 
 # Measure some value per class during training
 class ClassAverageMeter:
-    def __init__(self, args):
+    def __init__(self, args, sample_counts):
         self.epoch_values = defaultdict(int)
         self.cum_values = defaultdict(list)
         self.cum_var = defaultdict(list)
         self.alpha = 0.9
         self.args = args
         
-        if self.args.balanced:
-            self.sample_counts = [5000] * args.num_classes
-        else:
-            self.sample_counts = [5000, 2997, 1796, 1077, 645, 387, 232, 139, 83, 50] # amount of samples per class
-
+        self.sample_counts = sample_counts # Amount of images per class
+        print(self.sample_counts)
     # Keep track of values within a single epoch
     def add_batch_value(self, values:torch.Tensor, labels:torch.Tensor):
         for l in range(labels.shape[0]):
             self.epoch_values[labels[l].item()] += values[l].item()
     
-    def update(self, epoch_labels=None):
-        self.sample_counts = epoch_labels if epoch_labels is not None else self.sample_counts
+    def update(self ):
         for key, value in self.epoch_values.items():
             avg_epoch_value = value / self.sample_counts[key]
             self.cum_values[key].append(avg_epoch_value)
 
-            # Get the EMA value
-            if len(self.cum_values[key]) > 1:
-                val = self.alpha * (avg_epoch_value - self.cum_values[key][-1]) ** 2 + (1-self.alpha) * (self.cum_var[key][-1])
-                self.cum_var[key].append(val)
-            else:
-                self.cum_var[key].append(0)
+            ## Get the EMA value
+            #if len(self.cum_values[key]) > 1:
+            #    val = self.alpha * (avg_epoch_value - self.cum_values[key][-1]) ** 2 + (1-self.alpha) * (self.cum_var[key][-1])
+            #    self.cum_var[key].append(val)
+            #else:
+            #    self.cum_var[key].append(0)
 
         # Append 0 if classid is not present
         classes = [i for i in range(self.args.num_classes)]
