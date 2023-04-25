@@ -16,12 +16,6 @@ class SimCLR(torch.nn.Module):
         # Paper, Figure 8, 2048-d encoder output
         self.encoder = base_encoder(num_classes=self.encoder_dim)
 
-        # Original kernel=(7,7), stride=3
-        self.encoder.conv1 = nn.Conv2d(
-            in_channels=3, out_channels=64,
-            kernel_size=3, stride=1
-            )
-        self.encoder.maxpool = nn.Identity()
 
         self.projector = torch.nn.Sequential(
             nn.Linear(self.encoder_dim, proj_hid_dim),
