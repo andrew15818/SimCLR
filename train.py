@@ -53,7 +53,9 @@ def train(model, loader, criterion, optimizer, scheduler, args, **kwargs):
         optimizer.zero_grad()
         z1 = model(x1)
         z2 = model(x2)
-        
+
+        norms = torch.norm((z1- z2), p=2, dim=1)
+        sims = F.cosine_similarity(z1, z2, dim=1) # Cosine similarity
         logits, labels = kwargs['info_nce'](z1, z2)
         loss = criterion(logits, labels)
         loss.backward()
@@ -64,8 +66,8 @@ def train(model, loader, criterion, optimizer, scheduler, args, **kwargs):
         # Get the measurements
         z1norm = F.normalize(z1, dim=1)
         z2norm = F.normalize(z2, dim=1)
-        norms = torch.norm((z1- z2), p=2, dim=1)
-        sims = F.cosine_similarity(z1, z2, dim=1) # Cosine similarity
+        
+        
         kwargs['normMeter'].add_batch_value(norms, targets)
 
         kwargs['simMeter'].add_batch_value(sims, targets)
