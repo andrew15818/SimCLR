@@ -39,8 +39,12 @@ parser.add_argument('--momentum', type=float, default=0.9)
 parser.add_argument('--temperature', type=float, default=0.3)
 
 
-def get_weights(values *args):
-    pass
+def get_weights(values, *args):
+   # Simple weighting, wi = 1 + di-\mu / (max(d) - min(d))
+    mean = values.mean()
+    w = 1 + ((values - mean)/ (values.max() - values.min()))
+    return w.detach()
+
 def train(model, loader, criterion, optimizer, scheduler, args, **kwargs):
     model.train()
     lossMeter = AverageMeter('loss')
@@ -55,9 +59,13 @@ def train(model, loader, criterion, optimizer, scheduler, args, **kwargs):
         z2 = model(x2)
 
         norms = torch.norm((z1- z2), p=2, dim=1)
-        sims = F.cosine_similarity(z1, z2, dim=1) # Cosine similarity
+        sims = F.cosine_similarity(z1, z2, dim=1) 
+
         logits, labels = kwargs['info_nce'](z1, z2)
-        loss = criterion(logits, labels)
+        #w = get_weights(norms)
+        w = torch.ones_like(norms)
+        loss = torch.mean(criterion(logits, labels) *
+                torch.cat([w,w], dim=0))
         loss.backward()
         optimizer.step()
         scheduler.step()
@@ -69,8 +77,8 @@ def train(model, loader, criterion, optimizer, scheduler, args, **kwargs):
         
         
         kwargs['normMeter'].add_batch_value(norms, targets)
-
         kwargs['simMeter'].add_batch_value(sims, targets)
+        kwargs['weightMeter'].add_batch_value(w, targets)
         top1, top5 = accuracy(logits, labels, topk=(1, 5))
         accMeter1.update(top1.item(), targets.size(0))
         accMeter5.update(top5.item(), targets.size(0))
@@ -126,7 +134,7 @@ def main():
     
     model.to(args.device)
     info_nce = nt_xent(args.temperature)
-    criterion = torch.nn.CrossEntropyLoss()
+    criterion = torch.nn.CrossEntropyLoss(reduction='none')
 
     if args.optimizer == 'adam':
         optimizer = optim.Adam(
@@ -143,6 +151,8 @@ def main():
     trainLosses, trainAccs  = [], []
     normMeter = ClassAverageMeter(args, train_dataset.img_num_list)
     simMeter = ClassAverageMeter(args, train_dataset.img_num_list)
+    weightMeter = ClassAverageMeter(args, train_dataset.img_num_list)
+
     for epoch in range(args.epochs):
         loss, acc = train(
             model, train_loader, 
@@ -150,6 +160,7 @@ def main():
             scheduler, args,
             normMeter=normMeter,
             simMeter=simMeter,
+            weightMeter=weightMeter,
             info_nce=info_nce)
         print(f'Epoch {epoch} Average Loss: {loss:.4f} Top1: {acc:.4f}')
         trainLosses.append(loss)
@@ -163,15 +174,20 @@ def main():
             'arch': args.arch,
         }, filename='runs/checkpoint.pth.tar')
         # Update values we're tracking
-        update_meters(normMeter, simMeter)
-
+        update_meters(normMeter, simMeter, weightMeter)
         plot(trainLosses)
-        plot(trainAccs,title='Training Accuracies', ylabel='Accuracy', filename='imgs/accuracies.png')
-        plot_category(normMeter.get_values(), ylabel=r'$d_i$', title=f'Norm difference with {args.optimizer}', epoch=epoch, filename='imgs/norm_difference.png')
+        plot(trainAccs,title='{args.dataset} Training Accuracies', 
+                ylabel='Accuracy', filename='imgs/accuracies.png')
+        plot_category(normMeter.get_values(), ylabel=r'$d_i$', 
+                title=f'{args.dataset } Norm difference', epoch=epoch, 
+                filename='imgs/norm_difference.png')
         plot_category(simMeter.get_values(), 
-                ylabel='Cosine Similarity', title='Cosine Similarity between corresponding views.', 
+                ylabel='Cosine Similarity', title=f'{args.dataset} Cosine Similarity between corresponding views.', 
                 epoch=epoch,
                 filename='imgs/cosine_sims.png')
+        plot_category(weightMeter.get_values(), 
+                ylabel='weight', title=f'{args.dataset} Weights per cateogry', 
+                epoch=epoch, filename='imgs/weights.png')
     print(args)
 if __name__ == '__main__':
     main()
