@@ -89,8 +89,7 @@ def main():
     train_loader = DataLoader(train_dataset, shuffle=True, batch_size=args.batch_size)
     test_loader = DataLoader(test_dataset, shuffle=True, batch_size=args.batch_size)
 
-    #optimizer = optim.Adam(model.parameters(), lr=args.lr, weight_decay=0.0008)
-    optimizer = optim.SGD(model.parameters(), lr=0.3)
+    optimizer = optim.Adam(model.parameters(), lr=args.lr, weight_decay=0.0008)
     criterion = torch.nn.CrossEntropyLoss().to(device)
     
     # Just one number since the datasets are balanced and contain equal number of samples/class
