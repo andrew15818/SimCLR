@@ -9,12 +9,13 @@ class ImbalanceCIFAR10(torchvision.datasets.CIFAR10):
     cls_num = 10
 
     def __init__(self, root, imb_type='exp', imb_factor=0.01, rand_number=0, train=True,
-                 transform=None, target_transform=None, download=False):
+                 transform=None, target_transform=None, download=False, shuffleClasses=False):
         super(ImbalanceCIFAR10, self).__init__(root, train, transform, target_transform, download)
         np.random.seed(rand_number)
         img_num_list = self.get_img_num_per_cls(self.cls_num, imb_type, imb_factor)
-        print(img_num_list)
+        self.shuffleClasses = shuffleClasses
         self.gen_imbalanced_data(img_num_list)
+       
 
     def get_img_num_per_cls(self, cls_num, imb_type, imb_factor):
         img_max = len(self.data) / cls_num
@@ -37,9 +38,11 @@ class ImbalanceCIFAR10(torchvision.datasets.CIFAR10):
         new_targets = []
         targets_np = np.array(self.targets, dtype=np.int64)
         classes = np.unique(targets_np)
-        # np.random.shuffle(classes)
+        if self.shuffleClasses:
+            np.random.shuffle(classes)
         self.num_per_cls_dict = dict()
         for the_class, the_img_num in zip(classes, img_num_per_cls):
+            print(f'{the_class}: {the_img_num}')
             self.num_per_cls_dict[the_class] = the_img_num
             idx = np.where(targets_np == the_class)[0]
             np.random.shuffle(idx)
@@ -183,8 +186,5 @@ if __name__ == '__main__':
         [transforms.ToTensor(),
          transforms.Normalize((0.5, 0.5, 0.5), (0.5, 0.5, 0.5))]
     )
-    trainset = SemiSupervisedImbalanceCIFAR10(root='./data', train=True,
-                                              download=True, transform=transform)
-    trainloader = iter(trainset)
-    data, label = next(trainloader)
-    import pdb; pdb.set_trace()
+    trainset = ImbalanceCIFAR10(root='../datasets', train=True,
+                                              download=False, transform=transform, shuffleClasses=True)
