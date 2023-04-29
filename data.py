@@ -49,11 +49,12 @@ class ImbalanceCIFAR10(torchvision.datasets.CIFAR10):
     cls_num = 10
 
     def __init__(self, root, imb_type='exp', imb_factor=0.01, rand_number=0, train=True,
-                 transform=None, target_transform=None, download=False):
+                 transform=None, target_transform=None, download=False, shuffleClasses=True):
         super(ImbalanceCIFAR10, self).__init__(root, train, transform, target_transform, download)
-        np.random.seed(rand_number)
         img_num_list = self.get_img_num_per_cls(self.cls_num, imb_type, imb_factor)
         print(img_num_list)
+        self.imb_factor = imb_factor
+        self.shuffleClasses = shuffleClasses
         self.gen_imbalanced_data(img_num_list)
         self.img_num_list = img_num_list
 
@@ -78,7 +79,9 @@ class ImbalanceCIFAR10(torchvision.datasets.CIFAR10):
         new_targets = []
         targets_np = np.array(self.targets, dtype=np.int64)
         classes = np.unique(targets_np)
-        # np.random.shuffle(classes)
+        if self.shuffleClasses:
+            np.random.shuffle(classes)
+
         self.num_per_cls_dict = dict()
         for the_class, the_img_num in zip(classes, img_num_per_cls):
             self.num_per_cls_dict[the_class] = the_img_num
@@ -90,12 +93,16 @@ class ImbalanceCIFAR10(torchvision.datasets.CIFAR10):
         new_data = np.vstack(new_data)
         self.data = new_data
         self.targets = new_targets
-        
-    def get_cls_num_list(self):
-        cls_num_list = []
-        for i in range(self.cls_num):
-            cls_num_list.append(self.num_per_cls_dict[i])
-        return cls_num_list
+         
+        # Save current dataset so we know Many, Medium, Few classes
+        np.save(f'splits/cifar{cls_num}_imb.npy', np.array(self.targets))
+
+    def get_cls_num_dict(self):
+        #cls_num_list = []
+        #for i in range(self.cls_num):
+        #    cls_num_list.append(self.num_per_cls_dict[i])
+        #return cls_num_list
+        return self.num_per_cls_dict
 
     def __getitem__(self, idx):
         img = self.data[idx]
@@ -109,12 +116,10 @@ class ImbalanceCIFAR10(torchvision.datasets.CIFAR10):
 
 class ImbalanceCIFAR100(torchvision.datasets.CIFAR100):
     cls_num = 100
-    def __init__(self, root, imb_type='exp', imb_factor=0.01, rand_number=0, train=True,
+    def __init__(self, root, imb_type='exp', imb_factor=0.01, train=True,
                  transform=None, target_transform=None, download=False):
         super(ImbalanceCIFAR100, self).__init__(root, train, transform, target_transform, download)
-        np.random.seed(rand_number)
         img_num_list = self.get_img_num_per_cls(self.cls_num, imb_type, imb_factor)
-        print(img_num_list)
         self.gen_imbalanced_data(img_num_list)
         self.img_num_list = img_num_list
 
@@ -151,11 +156,11 @@ class ImbalanceCIFAR100(torchvision.datasets.CIFAR100):
         new_data = np.vstack(new_data)
         self.data = new_data
         self.targets = new_targets
-        
-    def get_cls_num_list(self):
-        cls_num_list = []
+        print(np.array(self.targets).shape)
+    def get_cls_num_dict(self):
+        cls_num_dict = {}
         for i in range(self.cls_num):
-            cls_num_list.append(self.num_per_cls_dict[i])
+            cls_num_list[i] = self.num_per_cls_dict[i].append(self.num_per_cls_dict[i])
         return cls_num_list
 
     def __getitem__(self, idx):
@@ -168,11 +173,10 @@ class ImbalanceCIFAR100(torchvision.datasets.CIFAR100):
         x2 = self.transform(img)
         return [x1, x2], target
 
-
 # Debug
 if __name__=='__main__':
     trainaugs, testaugs = get_transforms()
-    dataset = ImbalanceCIFAR100(root='../datasets', 
+    dataset = ImbalanceCIFAR10(root='../datasets', 
                             train=True, 
                             transform=trainaugs)
     print(dataset.img_num_list)
