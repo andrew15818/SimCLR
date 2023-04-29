@@ -42,7 +42,6 @@ class ImbalanceCIFAR10(torchvision.datasets.CIFAR10):
             np.random.shuffle(classes)
         self.num_per_cls_dict = dict()
         for the_class, the_img_num in zip(classes, img_num_per_cls):
-            print(f'{the_class}: {the_img_num}')
             self.num_per_cls_dict[the_class] = the_img_num
             idx = np.where(targets_np == the_class)[0]
             np.random.shuffle(idx)
