@@ -68,12 +68,13 @@ def plot_category(values, epoch=0,
      # Just split into thirds
     class_num = len(list(values.keys()))
     interval = class_num // 3
+    # Assuming the classes are **sorted** in decreasing sample number
     categories = {'Many': [0,interval],
                   'Medium': [interval, 2*interval +1],
                   'Few': [2*interval+1, class_num-1]}
 
     # Group by  class indices into Many, Medium, Few
-    for category, classids in categories.items():
+    for category, classids in sorted(categories.items(), key=lambda t: t[0]):
         start, end = classids
         avg = np.zeros((epoch+1))
         for i in range(start, end):
