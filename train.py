@@ -22,6 +22,8 @@ parser =  argparse.ArgumentParser()
 parser.add_argument('--arch', type=str, default='resnet18', help='encoder architecture.')
 parser.add_argument('--lr', type=float, default=0.0003, help='initial lr')
 parser.add_argument('--batch-size', type=int, default=256, help='batch size')
+parser.add_argument('--seed', type=int, default=0,
+        help='Seed to split the classes along')
 parser.add_argument('--data-dir', type=str, default='../../cvdl2022', help='path to the dataset')
 parser.add_argument('--dataset', type=str, default='cifar10', help='Name of the dataset to use.')
 parser.add_argument('--balanced', action='store_true', default=False, 
@@ -97,12 +99,13 @@ def main():
             dataset = data.ImbalanceCIFAR10
     elif args.dataset == 'cifar100':
             dataset = data.ImbalanceCIFAR100
+    print(dataset)
     train_dataset = dataset(
             args.data_dir, 
             train=True, 
             download=True, 
-            transform=train_augs)
-    print(train_dataset)
+            transform=train_augs,
+            shuffleClasses=True)
     train_loader = DataLoader(
             train_dataset, 
             batch_size=args.batch_size, shuffle=True)
@@ -137,8 +140,8 @@ def main():
         optimizer, T_max=len(train_loader))
 
     trainLosses, trainAccs  = [], []
-    normMeter = ClassAverageMeter(args, train_dataset.img_num_list)
-    simMeter = ClassAverageMeter(args, train_dataset.img_num_list)
+    normMeter = ClassAverageMeter(args, train_dataset.get_cls_num_dict())
+    simMeter = ClassAverageMeter(args, train_dataset.get_cls_num_dict())
     for epoch in range(args.epochs):
         loss, acc = train(
             model, train_loader, 
