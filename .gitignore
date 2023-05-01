@@ -5,3 +5,5 @@ runs/
 
 splits/
 *.npy
+
+pycache/
