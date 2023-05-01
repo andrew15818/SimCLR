@@ -66,18 +66,20 @@ def plot_category(values, epoch=0,
     plt.xlabel(xlabel)
     plt.ylabel(ylabel)
      # Just split into thirds
-    class_num = len(list(values.keys()))
+    class_num = len(values.keys())
     interval = class_num // 3
+    # Assuming the classes are **sorted** in decreasing sample number
     categories = {'Many': [0,interval],
                   'Medium': [interval, 2*interval +1],
-                  'Few': [2*interval+1, class_num-1]}
+                  'Few': [2*interval+1, class_num]}
 
     # Group by  class indices into Many, Medium, Few
-    for category, classids in categories.items():
-        start, end = classids
+    for category, bounds in categories.items():
+        start, end = bounds
+        category_values = list(values.keys())[start:end]
         avg = np.zeros((epoch+1))
-        for i in range(start, end):
-            avg += np.array(values[i])
+        for classid in category_values:
+            avg += values[classid] 
         avg /= (end - start)
         plt.plot(avg, label=category)
 
@@ -117,6 +119,7 @@ def plot_class_and_category(values, epoch=0,
         for i in range(start, end):
             avg += np.array(values[i])
         avg /= (end - start)
+        print(end - start)
         axes[1].plot(avg[0], label=category)
 
     axes[1].set_title('By category') 
@@ -163,7 +166,7 @@ class AverageMeter(object):
 
 # Measure some value per class during training
 class ClassAverageMeter:
-    def __init__(self, args, sample_counts):
+    def __init__(self, args, sample_counts:dict):
         self.epoch_values = defaultdict(int)
         self.cum_values = defaultdict(list)
         self.cum_var = defaultdict(list)
@@ -196,7 +199,10 @@ class ClassAverageMeter:
 
         self.epoch_values = defaultdict(int)
     def get_values(self):
-        return self.cum_values
+        sorted_values = {}
+        for classid, values in sorted(self.cum_values.items(), key=lambda item: self.sample_counts[item[0]], reverse=True):
+            sorted_values[classid] = values
+        return sorted_values
 
     def get_var_ema(self):
         return self.cum_var

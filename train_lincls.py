@@ -46,10 +46,21 @@ def accuracy(output, target, topk=(1,)):
             res.append(correct_k.mul_(100.0 / batch_size))
         return res
 
-def main():
-    device = 'cuda' if torch.cuda.is_available() else 'cpu'
+#Open the file with the latest class distribution
+def get_latest_class_distribution(args, path=None):
+    targets = np.load(f'splits/{args.dataset_name}_imb.npy')
+    class_dist = {}
+    for i in range(args.num_classes):
+        class_count = np.count_nonzero(targets == i)
+        class_dist[i] = class_count
+    print(class_dist)
+    return class_dist
 
+def main():
     args = parser.parse_args()
+    device = 'cuda' if torch.cuda.is_available() else 'cpu'
+    class_dist = get_latest_class_distribution(args) 
+    
     if args.arch == 'resnet18':
         model = models.resnet18(pretrained=False, num_classes=args.num_classes)
     elif args.arch == 'resnet50':
@@ -90,7 +101,6 @@ def main():
     test_loader = DataLoader(test_dataset, shuffle=True, batch_size=args.batch_size)
 
     optimizer = optim.Adam(model.parameters(), lr=args.lr, weight_decay=0.0008)
-    #optimizer = optim.SGD(model.parameters(), lr=0.3)
     criterion = torch.nn.CrossEntropyLoss().to(device)
     
     # Just one number since the datasets are balanced and contain equal number of samples/class
@@ -151,12 +161,12 @@ def main():
         Test Top 1: {testTop1.avg:.4f} \
         Test Top5: {testTop5.avg:.4f}')
         # Print based on category
-        print_category_accs(trainClassAccs, testClassAccs, args)
+        print_category_accs(trainClassAccs, testClassAccs, class_dist, args)
         
     print(f'{sorted(testClassAccs.items(), key=lambda t: t[0])}')
 
 # Order by Many, Medium, Few
-def print_category_accs(trainAccs:dict, testAccs:dict, args):
+def print_category_accs(trainAccs:dict, testAccs:dict, class_dist:dict, args):
     # Collect all the ordered accs into lists for easy index
     trainValues, testValues = [], []
     #print('Appending...')
@@ -166,13 +176,14 @@ def print_category_accs(trainAccs:dict, testAccs:dict, args):
             if i not in testAccs:
                 testAccs[i] = 0
         print(f'Fixed length to {len(list(testAccs.keys()))}')
-    for testid, testAcc in sorted(testAccs.items(), key=lambda t: t[0]):
-        #print(f'{testid}, ', end='')
-        testValues.append(testAcc)
+
+    for classId, classCount in sorted(class_dist.items(), key=lambda t: t[1], reverse=True):
+        #print(f'{classId}, ', end='')
+        testValues.append(testAccs[classId])
 
     interval = args.num_classes // 3
     tv = np.array(testValues)
     #print(f'Many: 0-{interval} Medium: {interval}:{2*interval+1} Few: {2*interval+1}:{args.num_classes}')
-    print(f'\tMany: {np.mean(tv[0:interval])}, Medium:{np.mean(tv[interval:2*interval+1])}, Few: {np.mean(tv[2*interval+1:])}')
+    print(f'\tMany: {np.mean(tv[0:interval]):.4f}, Medium:{np.mean(tv[interval:2*interval+1]):.4f}, Few: {np.mean(tv[2*interval+1:]):.4f}')
 if __name__ == '__main__':
     main()
