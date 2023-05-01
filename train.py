@@ -63,7 +63,6 @@ def train(model, loader, criterion, optimizer, scheduler, args, **kwargs):
 
         logits, labels = kwargs['info_nce'](z1, z2)
         #w = get_weights(norms)
-        w = torch.ones_like(norms)
         loss = torch.mean(criterion(logits, labels) *
                 torch.cat([w,w], dim=0))
         loss.backward()
