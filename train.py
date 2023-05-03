@@ -44,7 +44,7 @@ parser.add_argument('--temperature', type=float, default=0.3)
 def get_weights(values, *args):
    # Simple weighting, wi = 1 + di-\mu / (max(d) - min(d))
     mean = values.mean()
-    w = 1 + ((values - mean)/ (values.max() - values.min()))
+    w = 1 + (torch.abs(values - mean)/ (values.max() - values.min()))
     return w.detach()
 
 def train(model, loader, criterion, optimizer, scheduler, args, **kwargs):
@@ -60,11 +60,11 @@ def train(model, loader, criterion, optimizer, scheduler, args, **kwargs):
         z1 = model(x1)
         z2 = model(x2)
 
-        norms = torch.norm((z1- z2), p=2, dim=1)
+        norms = torch.square(torch.norm((z1- z2), p=2, dim=1))
         sims = F.cosine_similarity(z1, z2, dim=1) 
 
         logits, labels = kwargs['info_nce'](z1, z2)
-        #w = get_weights(norms)
+        w = get_weights(norms)
         loss = torch.mean(criterion(logits, labels) *
                 torch.cat([w,w], dim=0))
         loss.backward()
@@ -151,9 +151,9 @@ def main():
         optimizer, T_max=len(train_loader))
 
     trainLosses, trainAccs  = [], []
-    normMeter = ClassAverageMeter(args, train_dataset.img_num_list)
-    simMeter = ClassAverageMeter(args, train_dataset.img_num_list)
-    weightMeter = ClassAverageMeter(args, train_dataset.img_num_list)
+    normMeter = ClassAverageMeter(args, train_dataset.get_cls_num_dict())
+    simMeter = ClassAverageMeter(args, train_dataset.get_cls_num_dict())
+    weightMeter = ClassAverageMeter(args, train_dataset.get_cls_num_dict())
 
     for epoch in range(args.epochs):
         loss, acc = train(
@@ -181,7 +181,7 @@ def main():
         plot(trainAccs,title='{args.dataset} Training Accuracies', 
                 ylabel='Accuracy', filename='imgs/accuracies.png')
         plot_category(normMeter.get_values(), ylabel=r'$d_i$', 
-                title=f'{args.dataset } Norm difference', epoch=epoch, 
+                title=f'{args.dataset} Norm difference', epoch=epoch, 
                 filename='imgs/norm_difference.png')
         plot_category(simMeter.get_values(), 
                 ylabel='Cosine Similarity', title=f'{args.dataset} Cosine Similarity between corresponding views.', 

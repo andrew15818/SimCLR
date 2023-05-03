@@ -6,7 +6,7 @@ python train.py \
 	--dataset cifar10 \
 	--num-classes 10 \
 	--optimizer adam \
-	--lr .0004 \
+	--lr .0003 \
 	--encoder_dim 512 \
 	--proj_hid_dim 128 \
-	--epochs 1200 \
+	--epochs 400 \
