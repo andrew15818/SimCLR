@@ -63,7 +63,7 @@ def train(model, loader, criterion, optimizer, scheduler, args, **kwargs):
         sims = F.cosine_similarity(z1, z2, dim=1) 
 
         logits, labels = kwargs['info_nce'](z1, z2)
-        w = get_weights(norms)
+        w = get_weights(sims)
         loss = torch.mean(criterion(logits, labels) *
                 torch.cat([w,w], dim=0))
         loss.backward()
@@ -126,7 +126,8 @@ def main():
     model = SimCLR(
         models.__dict__[args.arch],encoder_dim=args.encoder_dim, 
         proj_hid_dim=args.proj_hid_dim)
-
+    
+       
     # Replace the first conv layer only for cifar10
     if args.dataset == 'cifar10' or args.dataset == 'cifar100':
         model.encoder.conv1 = nn.Conv2d(in_channels=3, out_channels=64, 
@@ -136,6 +137,7 @@ def main():
     model.to(args.device)
     info_nce = nt_xent(args.temperature)
     criterion = torch.nn.CrossEntropyLoss(reduction='none')
+    startEpoch = 0
 
     if args.optimizer == 'adam':
         optimizer = optim.Adam(
@@ -149,12 +151,20 @@ def main():
     scheduler = optim.lr_scheduler.CosineAnnealingLR(
         optimizer, T_max=len(train_loader))
 
+    # Load pre-trained model
+    if args.resume != '':
+        checkpoint = torch.load(args.resume)
+        optimizer.load_state_dict(checkpoint['optimizer'])
+        startEpoch = checkpoint['epoch']
+        model.load_state_dict(checkpoint['state_dict'])
+        print(f'Loaded Model, will start from epoch {startEpoch}')
+     
     trainLosses, trainAccs  = [], []
     normMeter = ClassAverageMeter(args, train_dataset.get_cls_num_dict())
     simMeter = ClassAverageMeter(args, train_dataset.get_cls_num_dict())
     weightMeter = ClassAverageMeter(args, train_dataset.get_cls_num_dict())
 
-    for epoch in range(args.epochs):
+    for epoch in range(startEpoch, args.epochs):
         loss, acc = train(
             model, train_loader, 
             criterion, optimizer, 
