@@ -58,7 +58,7 @@ def get_latest_class_distribution(args, path=None):
 
 def main():
     args = parser.parse_args()
-    device = 'cuda' if torch.cuda.is_available() else 'cpu'
+    device = 'cuda:1' if torch.cuda.is_available() else 'cpu'
     class_dist = get_latest_class_distribution(args) 
     
     if args.arch == 'resnet18':

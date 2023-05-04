@@ -9,4 +9,4 @@ python train.py \
 	--lr .0003 \
 	--encoder_dim 512 \
 	--proj_hid_dim 128 \
-	--epochs 400 \
+	--epochs 2000 \
