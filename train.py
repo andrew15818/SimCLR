@@ -63,7 +63,7 @@ def train(model, loader, criterion, optimizer, scheduler, args, **kwargs):
         sims = F.cosine_similarity(z1, z2, dim=1) 
 
         logits, labels = kwargs['info_nce'](z1, z2)
-        w = get_weights(sims)
+        w = get_weights(sims.clone())
         loss = torch.mean(criterion(logits, labels) *
                 torch.cat([w,w], dim=0))
         loss.backward()
@@ -156,15 +156,16 @@ def main():
         checkpoint = torch.load(args.resume)
         optimizer.load_state_dict(checkpoint['optimizer'])
         startEpoch = checkpoint['epoch']
+        args.epochs -= startEpoch 
         model.load_state_dict(checkpoint['state_dict'])
-        print(f'Loaded Model, will start from epoch {startEpoch}')
+        print(f'Loaded Model, will train for {args.epochs} epochs')
      
     trainLosses, trainAccs  = [], []
     normMeter = ClassAverageMeter(args, train_dataset.get_cls_num_dict())
     simMeter = ClassAverageMeter(args, train_dataset.get_cls_num_dict())
     weightMeter = ClassAverageMeter(args, train_dataset.get_cls_num_dict())
 
-    for epoch in range(startEpoch, args.epochs):
+    for epoch in range(args.epochs):
         loss, acc = train(
             model, train_loader, 
             criterion, optimizer, 
