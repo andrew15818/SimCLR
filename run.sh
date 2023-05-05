@@ -8,5 +8,6 @@ python train.py \
 	--optimizer adam \
 	--lr .0003 \
 	--encoder_dim 512 \
+	--temperature 0.2 \
 	--proj_hid_dim 128 \
-	--epochs 2000 \
+	--epochs 1200 \
