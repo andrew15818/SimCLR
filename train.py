@@ -166,11 +166,12 @@ def main():
 
         plot(trainLosses)
         plot(trainAccs,title='Training Accuracies', ylabel='Accuracy', filename='imgs/accuracies.png')
-        plot_category(normMeter.get_values(), ylabel=r'$d_i$', title=f'Norm difference with {args.optimizer}', epoch=epoch, filename='imgs/norm_difference.png')
+        plot_category(normMeter.get_values(), ylabel=r'$d_i$', title=f'Norm difference between positive views.', epoch=epoch, filename='imgs/norm_difference.png')
         plot_category(simMeter.get_values(), 
                 ylabel='Cosine Similarity', title='Cosine Similarity between corresponding views.', 
                 epoch=epoch,
                 filename='imgs/cosine_sims.png')
+        
     print(args)
 if __name__ == '__main__':
     main()
