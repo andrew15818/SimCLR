@@ -43,8 +43,7 @@ parser.add_argument('--temperature', type=float, default=0.3)
 
 def get_weights(values, *args):
     mean = values.mean()
-    di = values - mean
-    w = di ** 0.05
+    w = 1 - ((values - mean) / (values.max() - values.min()))
     return w.detach()
 
 def train(model, loader, criterion, optimizer, scheduler, args, **kwargs):
@@ -116,7 +115,7 @@ def main():
             train=True, 
             download=True, 
             transform=train_augs,
-            shuffleClasses=True)
+            shuffleClasses=False)
     train_loader = DataLoader(
             train_dataset, 
             batch_size=args.batch_size, shuffle=True)
