@@ -69,6 +69,7 @@ def train(model, loader, criterion, optimizer, scheduler, args, **kwargs):
         kwargs['normMeter'].add_batch_value(norms, targets)
 
         kwargs['simMeter'].add_batch_value(sims, targets)
+        kwargs['viewNormMeter'].add_batch_value(torch.norm(z1, p=2, dim=1), targets)
         top1, top5 = accuracy(logits, labels, topk=(1, 5))
         accMeter1.update(top1.item(), targets.size(0))
         accMeter5.update(top5.item(), targets.size(0))
@@ -140,8 +141,11 @@ def main():
         optimizer, T_max=len(train_loader))
 
     trainLosses, trainAccs  = [], []
+    
     normMeter = ClassAverageMeter(args, train_dataset.get_cls_num_dict())
     simMeter = ClassAverageMeter(args, train_dataset.get_cls_num_dict())
+    # Measure the embeddings of a view, w/o using the difference
+    viewNormMeter = ClassAverageMeter(args, train_dataset.get_cls_num_dict())
     for epoch in range(args.epochs):
         loss, acc = train(
             model, train_loader, 
@@ -149,6 +153,7 @@ def main():
             scheduler, args,
             normMeter=normMeter,
             simMeter=simMeter,
+            viewNormMeter=viewNormMeter,
             info_nce=info_nce)
         print(f'Epoch {epoch} Average Loss: {loss:.4f} Top1: {acc:.4f}')
         trainLosses.append(loss)
@@ -162,7 +167,7 @@ def main():
             'arch': args.arch,
         }, filename='runs/checkpoint.pth.tar')
         # Update values we're tracking
-        update_meters(normMeter, simMeter)
+        update_meters(normMeter, simMeter, viewNormMeter)
 
         plot(trainLosses)
         plot(trainAccs,title='Training Accuracies', ylabel='Accuracy', filename='imgs/accuracies.png')
@@ -171,6 +176,9 @@ def main():
                 ylabel='Cosine Similarity', title='Cosine Similarity between corresponding views.', 
                 epoch=epoch,
                 filename='imgs/cosine_sims.png')
+        plot_category(viewNormMeter.get_values(), ylabel=r'$\|z_i\|$', 
+                title='Norm of single branch embeddings.', epoch=epoch, 
+                filename='imgs/singleViewNorm.png')
         
     print(args)
 if __name__ == '__main__':
