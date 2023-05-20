@@ -22,6 +22,8 @@ parser =  argparse.ArgumentParser()
 parser.add_argument('--arch', type=str, default='resnet18', help='encoder architecture.')
 parser.add_argument('--lr', type=float, default=0.0003, help='initial lr')
 parser.add_argument('--batch-size', type=int, default=256, help='batch size')
+parser.add_argument('--shuffle-classes', action='store_true', default=False,
+                   help='Shuffle the class indices.')
 parser.add_argument('--seed', type=int, default=0,
         help='Seed to split the classes along')
 parser.add_argument('--data-dir', type=str, default='../../cvdl2022', help='path to the dataset')
@@ -47,6 +49,12 @@ def get_weights(values, *args):
     return w.detach()
 
 def train(model, loader, criterion, optimizer, scheduler, args, **kwargs):
+    ## Start the time measuring code
+    start = torch.cuda.Event(enable_timing=True)
+    end = torch.cuda.Event(enable_timing=True)
+    cum_time = torch.cuda.Event(enable_timing=True)
+    start.record()
+
     model.train()
     lossMeter = AverageMeter('loss')
     accMeter1 = AverageMeter('Top1')
@@ -63,7 +71,8 @@ def train(model, loader, criterion, optimizer, scheduler, args, **kwargs):
         sims = F.cosine_similarity(z1, z2, dim=1) 
 
         logits, labels = kwargs['info_nce'](z1, z2)
-        w = get_weights(sims.clone())
+        #w = get_weights(sims.clone())
+        w = torch.ones_like(sims)
         loss = torch.mean(criterion(logits, labels) *
                 torch.cat([w,w], dim=0))
         loss.backward()
@@ -75,10 +84,12 @@ def train(model, loader, criterion, optimizer, scheduler, args, **kwargs):
         z1norm = F.normalize(z1, dim=1)
         z2norm = F.normalize(z2, dim=1)
         
-        
+        if i == len(loader)-1:
+            end.record()
         kwargs['normMeter'].add_batch_value(norms, targets)
         kwargs['simMeter'].add_batch_value(sims, targets)
         kwargs['weightMeter'].add_batch_value(w, targets)
+        kwargs['viewNormMeter'].add_batch_value(torch.norm(z1, p=2, dim=1), targets)
         top1, top5 = accuracy(logits, labels, topk=(1, 5))
         accMeter1.update(top1.item(), targets.size(0))
         accMeter5.update(top5.item(), targets.size(0))
@@ -87,7 +98,9 @@ def train(model, loader, criterion, optimizer, scheduler, args, **kwargs):
         
         if i % 20 == 0:
             print(f'Batch [{i+1}/{len(loader)}] Loss: {lossMeter.avg:.4f} Top1: {accMeter1.avg:.4f} Top5: {accMeter5.avg:.4f}')
-    return lossMeter.avg, accMeter1.avg
+    torch.cuda.synchronize()
+    print(f'Time per epoch: {start.elapsed_time(end)/ 1000}')
+    return lossMeter.avg, accMeter1.avg, start.elapsed_time(end)
 
 def test():
     pass
@@ -115,7 +128,7 @@ def main():
             train=True, 
             download=True, 
             transform=train_augs,
-            shuffleClasses=False)
+            shuffleClasses=args.shuffle_classes)
     train_loader = DataLoader(
             train_dataset, 
             batch_size=args.batch_size, shuffle=True)
@@ -129,10 +142,10 @@ def main():
     
        
     # Replace the first conv layer only for cifar10
-    if args.dataset == 'cifar10' or args.dataset == 'cifar100':
-        model.encoder.conv1 = nn.Conv2d(in_channels=3, out_channels=64, 
-                                kernel_size=3, stride=1)
-        model.avgpool = nn.Identity()
+    #if args.dataset == 'cifar10' or args.dataset == 'cifar100':
+    #    model.encoder.conv1 = nn.Conv2d(in_channels=3, out_channels=64, 
+    #                            kernel_size=3, stride=1)
+    #    model.avgpool = nn.Identity()
     
     model.to(args.device)
     info_nce = nt_xent(args.temperature)
@@ -147,9 +160,10 @@ def main():
     elif args.optimizer == 'sgd':
         optimizer = optim.SGD(
                 model.parameters(), lr=args.lr,
-                weight_decay=args.weight_decay)
-    scheduler = optim.lr_scheduler.CosineAnnealingLR(
-        optimizer, T_max=len(train_loader))
+                weight_decay=args.weight_decay, momentum=args.momentum)
+    scheduler = optim.lr_scheduler.LambdaLR(optimizer,
+            lr_lambda=lambda step: cosine_annealing(step, args.epochs * len(train_loader), 
+                1, 1e-6/args.lr, warmup_steps=10*len(train_loader)))
 
     # Load pre-trained model
     if args.resume != '':
@@ -161,22 +175,29 @@ def main():
         print(f'Loaded Model, will train for {args.epochs} epochs')
      
     trainLosses, trainAccs  = [], []
+    trainingTime = 0  # Total training time over all epochs
+
     normMeter = ClassAverageMeter(args, train_dataset.get_cls_num_dict())
     simMeter = ClassAverageMeter(args, train_dataset.get_cls_num_dict())
     weightMeter = ClassAverageMeter(args, train_dataset.get_cls_num_dict())
+    # Measure the embeddings of a view, w/o using the difference
+    viewNormMeter = ClassAverageMeter(args, train_dataset.get_cls_num_dict())
 
     for epoch in range(args.epochs):
-        loss, acc = train(
+        loss, acc, time = train(
             model, train_loader, 
             criterion, optimizer, 
             scheduler, args,
             normMeter=normMeter,
             simMeter=simMeter,
             weightMeter=weightMeter,
+            viewNormMeter=viewNormMeter,
             info_nce=info_nce)
-        print(f'Epoch {epoch} Average Loss: {loss:.4f} Top1: {acc:.4f}')
+       
+        print(f'Epoch {epoch} Average Loss: {loss:.4f} Top1: {acc:.4f} Time: {time:.4f}')
         trainLosses.append(loss)
         trainAccs.append(acc)
+        trainingTime += time
 
         # Save model 
         save_checkpoint({
@@ -185,14 +206,13 @@ def main():
             'optimizer': optimizer.state_dict(),
             'arch': args.arch,
         }, filename='runs/checkpoint.pth.tar')
+
         # Update values we're tracking
-        update_meters(normMeter, simMeter, weightMeter)
+        update_meters(normMeter, simMeter, weightMeter, viewNormMeter)
+
         plot(trainLosses)
-        plot(trainAccs,title='{args.dataset} Training Accuracies', 
-                ylabel='Accuracy', filename='imgs/accuracies.png')
-        plot_category(normMeter.get_values(), ylabel=r'$d_i$', 
-                title=f'{args.dataset} Norm difference', epoch=epoch, 
-                filename='imgs/norm_difference.png')
+        plot(trainAccs,title='Training Accuracies', ylabel='Accuracy', filename='imgs/accuracies.png')
+        plot_category(normMeter.get_values(), ylabel=r'$d_i$', title=f'Norm difference between positive views.', epoch=epoch, filename='imgs/norm_difference.png')
         plot_category(simMeter.get_values(), 
                 ylabel='Cosine Similarity', title=f'{args.dataset} Cosine Similarity between corresponding views.', 
                 epoch=epoch,
@@ -200,6 +220,11 @@ def main():
         plot_category(weightMeter.get_values(), 
                 ylabel='weight', title=f'{args.dataset} Weights per cateogry', 
                 epoch=epoch, filename='imgs/weights.png')
+        plot_category(viewNormMeter.get_values(), ylabel=r'$\|z_i\|$', 
+                title='Norm of single branch embeddings.', epoch=epoch, 
+                filename='imgs/singleViewNorm.png')
+        
     print(args)
+    print(f'Total training time: {trainingTime}')
 if __name__ == '__main__':
     main()
