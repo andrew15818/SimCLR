@@ -176,6 +176,8 @@ def main():
     # Measure the embeddings of a view, w/o using the difference
     viewNormMeter = ClassAverageMeter(args, train_dataset.get_cls_num_dict())
 
+    normMeter = ClassAverageMeter(args, train_dataset.get_cls_num_dict())
+    simMeter = ClassAverageMeter(args, train_dataset.get_cls_num_dict())
     for epoch in range(args.epochs):
         loss, acc, time = train(
             model, train_loader, 
@@ -202,6 +204,7 @@ def main():
 
         # Update values we're tracking
         update_meters(normMeter, simMeter, weightMeter, viewNormMeter)
+        update_meters(normMeter, simMeter)
 
         plot(trainLosses)
         plot(trainAccs,title='Training Accuracies', ylabel='Accuracy', filename='imgs/accuracies.png')
