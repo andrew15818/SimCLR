@@ -111,7 +111,7 @@ def update_meters(*args):
 
 def main():
     args = parser.parse_args()
-    args.device = 'cuda:1' if torch.cuda.is_available() else 'cpu'
+    args.device = 'cuda:0' if torch.cuda.is_available() else 'cpu'
 
     train_augs, test_augs = data.get_transforms()
     if args.dataset == 'cifar10':
@@ -139,14 +139,7 @@ def main():
     model = SimCLR(
         models.__dict__[args.arch],encoder_dim=args.encoder_dim, 
         proj_hid_dim=args.proj_hid_dim)
-    
-       
-    # Replace the first conv layer only for cifar10
-    #if args.dataset == 'cifar10' or args.dataset == 'cifar100':
-    #    model.encoder.conv1 = nn.Conv2d(in_channels=3, out_channels=64, 
-    #                            kernel_size=3, stride=1)
-    #    model.avgpool = nn.Identity()
-    
+    print(model)   
     model.to(args.device)
     info_nce = nt_xent(args.temperature)
     criterion = torch.nn.CrossEntropyLoss(reduction='none')
