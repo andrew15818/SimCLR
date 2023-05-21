@@ -66,9 +66,8 @@ def main():
     elif args.arch == 'resnet50':
         model = models.resnet50(pretrained=False, num_classes=args.num_classes)
     if args.checkpoint != '':
-        checkpoint = torch.load('runs/checkpoint.pth.tar')
+        checkpoint = torch.load(args.checkpoint, map_location=device)
         state_dict = checkpoint['state_dict']
-    
     
     # Freeze the parameters except for last linear layer
     for k in list(state_dict.keys()):
