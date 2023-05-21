@@ -10,4 +10,5 @@ python train.py \
 	--encoder_dim 512 \
 	--temperature 0.2 \
 	--proj_hid_dim 128 \
-	--epochs 800 \
+	--resume runs/cifar10_orig_proj400.pth.tar \
+	--epochs  800 \

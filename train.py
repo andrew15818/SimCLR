@@ -170,55 +170,55 @@ def main():
     trainLosses, trainAccs  = [], []
     trainingTime = 0  # Total training time over all epochs
 
-    normMeter = ClassAverageMeter(args, train_dataset.get_cls_num_dict())
-    simMeter = ClassAverageMeter(args, train_dataset.get_cls_num_dict())
-    weightMeter = ClassAverageMeter(args, train_dataset.get_cls_num_dict())
-    # Measure the embeddings of a view, w/o using the difference
-    viewNormMeter = ClassAverageMeter(args, train_dataset.get_cls_num_dict())
+        normMeter = ClassAverageMeter(args, train_dataset.get_cls_num_dict())
+        simMeter = ClassAverageMeter(args, train_dataset.get_cls_num_dict())
+        weightMeter = ClassAverageMeter(args, train_dataset.get_cls_num_dict())
+        # Measure the embeddings of a view, w/o using the difference
+        viewNormMeter = ClassAverageMeter(args, train_dataset.get_cls_num_dict())
 
-    normMeter = ClassAverageMeter(args, train_dataset.get_cls_num_dict())
-    simMeter = ClassAverageMeter(args, train_dataset.get_cls_num_dict())
-    for epoch in range(args.epochs):
-        loss, acc, time = train(
-            model, train_loader, 
-            criterion, optimizer, 
-            scheduler, args,
-            normMeter=normMeter,
-            simMeter=simMeter,
-            weightMeter=weightMeter,
-            viewNormMeter=viewNormMeter,
-            info_nce=info_nce)
-       
-        print(f'Epoch {epoch} Average Loss: {loss:.4f} Top1: {acc:.4f} Time: {time:.4f}')
-        trainLosses.append(loss)
-        trainAccs.append(acc)
-        trainingTime += time
+        normMeter = ClassAverageMeter(args, train_dataset.get_cls_num_dict())
+        simMeter = ClassAverageMeter(args, train_dataset.get_cls_num_dict())
+        for epoch in range(args.epochs):
+            loss, acc, time = train(
+                model, train_loader, 
+                criterion, optimizer, 
+                scheduler, args,
+                normMeter=normMeter,
+                simMeter=simMeter,
+                weightMeter=weightMeter,
+                viewNormMeter=viewNormMeter,
+                info_nce=info_nce)
+           
+            print(f'Epoch {epoch} Average Loss: {loss:.4f} Top1: {acc:.4f} Time: {time:.4f}')
+            trainLosses.append(loss)
+            trainAccs.append(acc)
+            trainingTime += time
 
-        # Save model 
-        save_checkpoint({
-            'state_dict': model.state_dict(),
-            'epoch': epoch,
-            'optimizer': optimizer.state_dict(),
-            'arch': args.arch,
-        }, filename='runs/checkpoint.pth.tar')
+            # Save model 
+            save_checkpoint({
+                'state_dict': model.state_dict(),
+                'epoch': epoch,
+                'optimizer': optimizer.state_dict(),
+                'arch': args.arch,
+            }, filename='runs/checkpoint.pth.tar')
 
-        # Update values we're tracking
-        update_meters(normMeter, simMeter, weightMeter, viewNormMeter)
-        update_meters(normMeter, simMeter)
+            # Update values we're tracking
+            update_meters(normMeter, simMeter, weightMeter, viewNormMeter)
+            update_meters(normMeter, simMeter)
 
-        plot(trainLosses)
-        plot(trainAccs,title='Training Accuracies', ylabel='Accuracy', filename='imgs/accuracies.png')
-        plot_category(normMeter.get_values(), ylabel=r'$d_i$', title=f'Norm difference between positive views.', epoch=epoch, filename='imgs/norm_difference.png')
-        plot_category(simMeter.get_values(), 
-                ylabel='Cosine Similarity', title=f'{args.dataset} Cosine Similarity between corresponding views.', 
-                epoch=epoch,
-                filename='imgs/cosine_sims.png')
-        plot_category(weightMeter.get_values(), 
-                ylabel='weight', title=f'{args.dataset} Weights per cateogry', 
-                epoch=epoch, filename='imgs/weights.png')
-        plot_category(viewNormMeter.get_values(), ylabel=r'$\|z_i\|$', 
-                title='Norm of single branch embeddings.', epoch=epoch, 
-                filename='imgs/singleViewNorm.png')
+            plot(trainLosses)
+            plot(trainAccs,title='Training Accuracies', ylabel='Accuracy', filename='imgs/accuracies.png')
+            plot_category(normMeter.get_values(), ylabel=r'$d_i$', title=f'Norm difference between positive views.', epoch=epoch, filename='imgs/norm_difference.png')
+            plot_category(simMeter.get_values(), 
+                    ylabel='Cosine Similarity', title=f'{args.dataset} Cosine Similarity between corresponding views.', 
+                    epoch=epoch,
+                    filename='imgs/cosine_sims.png')
+            plot_category(weightMeter.get_values(), 
+                    ylabel='weight', title=f'{args.dataset} Weights per cateogry', 
+                    epoch=epoch, filename='imgs/weights.png')
+            plot_category(viewNormMeter.get_values(), ylabel=r'$\|z_i\|$', 
+                    title='Norm of single branch embeddings.', epoch=epoch, 
+                    filename='imgs/singleViewNorm.png')
         
     print(args)
     print(f'Total training time: {trainingTime}')
