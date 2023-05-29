@@ -46,7 +46,7 @@ parser.add_argument('--temperature', type=float, default=0.3)
 
 def get_weights(values):
     mean = values.mean()
-    w = 1 + ((values - mean ) / (values.max() - values.min())) 
+    w = 1 - ((values - mean ) / (values.max() - values.min())) 
     return w
 def train(model, loader, criterion, optimizer, scheduler, args, **kwargs):
     ## Start the time measuring code
