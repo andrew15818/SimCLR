@@ -171,6 +171,14 @@ def main():
 
         plot(trainLosses)
         plot(trainAccs,title='Training Accuracies', ylabel='Accuracy', filename='imgs/accuracies.png')
+        plot_by_class(normMeter.get_values(), ylabel=r'$d_i$', 
+                title=f'Norm difference between positive views by class', epoch=epoch,
+                filename='imgs/norm_difference_class.png')
+        plot_by_class(simMeter.get_values(), ylabel=r'$d_i$', title=f'Cosine similarity between positive views per class',
+                epoch=epoch, filename='imgs/cosine_sims_class.png')
+        plot_by_class(viewNormMeter.get_values(), ylabel=r'$\|z_i\|',
+                title='Norm of single branch embeddings/class', epoch=epoch, filename='imgs/singleViewNorm_class.png')
+
         plot_category(normMeter.get_values(), ylabel=r'$d_i$', title=f'Norm difference between positive views.', epoch=epoch, filename='imgs/norm_difference.png')
         plot_category(simMeter.get_values(), 
                 ylabel='Cosine Similarity', title='Cosine Similarity between corresponding views.', 
