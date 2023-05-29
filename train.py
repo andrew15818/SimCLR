@@ -23,6 +23,8 @@ parser =  argparse.ArgumentParser()
 parser.add_argument('--arch', type=str, default='resnet18', help='encoder architecture.')
 parser.add_argument('--lr', type=float, default=0.0003, help='initial lr')
 parser.add_argument('--batch-size', type=int, default=256, help='batch size')
+parser.add_argument('--shuffle-classes', action='store_true', default=False,
+                   help='Shuffle the class indices.')
 parser.add_argument('--seed', type=int, default=0,
         help='Seed to split the classes along')
 parser.add_argument('--data-dir', type=str, default='../../cvdl2022', help='path to the dataset')
@@ -47,6 +49,12 @@ def get_weights(values):
     w = 1 + ((values - mean ) / (values.max() - values.min())) 
     return w
 def train(model, loader, criterion, optimizer, scheduler, args, **kwargs):
+    ## Start the time measuring code
+    start = torch.cuda.Event(enable_timing=True)
+    end = torch.cuda.Event(enable_timing=True)
+    cum_time = torch.cuda.Event(enable_timing=True)
+    start.record()
+
     model.train()
     lossMeter = AverageMeter('loss')
     accMeter1 = AverageMeter('Top1')
@@ -58,18 +66,29 @@ def train(model, loader, criterion, optimizer, scheduler, args, **kwargs):
         optimizer.zero_grad()
         z1 = model(x1)
         z2 = model(x2)
-        
-        logits, labels = kwargs['info_nce'](z1, z2)
 
+        norms = torch.square(torch.norm((z1- z2), p=2, dim=1))
+        sims = F.cosine_similarity(z1, z2, dim=1) 
+
+        logits, labels = kwargs['info_nce'](z1, z2)
+        #w = get_weights(sims.clone())
+        w = torch.ones_like(sims)
+        loss = torch.mean(criterion(logits, labels) *
+                torch.cat([w,w], dim=0))
+        loss.backward()
+        optimizer.step()
+        scheduler.step()
+        lossMeter.update(loss.item())
+        
         # Get the measurements
         z1norm = F.normalize(z1, dim=1)
         z2norm = F.normalize(z2, dim=1)
-        norms = torch.norm((z1- z2), p=2, dim=1)
-        sims = F.cosine_similarity(z1, z2, dim=1) # Cosine similarity
-        w = get_weights(norms) 
+        
+        if i == len(loader)-1:
+            end.record()
         kwargs['normMeter'].add_batch_value(norms, targets)
-        kwargs['weightMeter'].add_batch_value(w, targets)
         kwargs['simMeter'].add_batch_value(sims, targets)
+        kwargs['weightMeter'].add_batch_value(w, targets)
         kwargs['viewNormMeter'].add_batch_value(torch.norm(z1, p=2, dim=1), targets)
         
 
@@ -87,7 +106,9 @@ def train(model, loader, criterion, optimizer, scheduler, args, **kwargs):
         
         if i % 20 == 0:
             print(f'Batch [{i+1}/{len(loader)}] Loss: {lossMeter.avg:.4f} Top1: {accMeter1.avg:.4f} Top5: {accMeter5.avg:.4f}')
-    return lossMeter.avg, accMeter1.avg
+    torch.cuda.synchronize()
+    print(f'Time per epoch: {start.elapsed_time(end)/ 1000}')
+    return lossMeter.avg, accMeter1.avg, start.elapsed_time(end)
 
 def test():
     pass
@@ -98,7 +119,7 @@ def update_meters(*args):
 
 def main():
     args = parser.parse_args()
-    args.device = 'cuda:1' if torch.cuda.is_available() else 'cpu'
+    args.device = 'cuda:0' if torch.cuda.is_available() else 'cpu'
 
     train_augs, test_augs = data.get_transforms()
     if args.dataset == 'cifar10':
@@ -115,7 +136,7 @@ def main():
             train=True, 
             download=True, 
             transform=train_augs,
-            shuffleClasses=False)
+            shuffleClasses=args.shuffle_classes)
     train_loader = DataLoader(
             train_dataset, 
             batch_size=args.batch_size, shuffle=True)
@@ -137,6 +158,13 @@ def main():
     model.to(args.device)
     info_nce = nt_xent(args.temperature)
     criterion = torch.nn.CrossEntropyLoss(reduction='none')
+=======
+    print(model)   
+    model.to(args.device)
+    info_nce = nt_xent(args.temperature)
+    criterion = torch.nn.CrossEntropyLoss(reduction='none')
+    startEpoch = 0
+>>>>>>> 6680a3302616870a5cb7ab8c90e7d46cf2808285
 
     if args.optimizer == 'adam':
         optimizer = optim.Adam(
@@ -146,65 +174,74 @@ def main():
     elif args.optimizer == 'sgd':
         optimizer = optim.SGD(
                 model.parameters(), lr=args.lr,
-                weight_decay=args.weight_decay)
-    scheduler = optim.lr_scheduler.CosineAnnealingLR(
-        optimizer, T_max=len(train_loader))
+                weight_decay=args.weight_decay, momentum=args.momentum)
+    scheduler = optim.lr_scheduler.LambdaLR(optimizer,
+            lr_lambda=lambda step: cosine_annealing(step, args.epochs * len(train_loader), 
+                1, 1e-6/args.lr, warmup_steps=10*len(train_loader)))
 
+    # Load pre-trained model
+    if args.resume != '':
+        checkpoint = torch.load(args.resume)
+        optimizer.load_state_dict(checkpoint['optimizer'])
+        startEpoch = checkpoint['epoch']
+        args.epochs -= startEpoch 
+        model.load_state_dict(checkpoint['state_dict'])
+        print(f'Loaded Model, will train for {args.epochs} epochs')
+     
     trainLosses, trainAccs  = [], []
-    
-    normMeter = ClassAverageMeter(args, train_dataset.get_cls_num_dict())
-    simMeter = ClassAverageMeter(args, train_dataset.get_cls_num_dict())
-    weightMeter = ClassAverageMeter(args, train_dataset.get_cls_num_dict())
-    # Measure the embeddings of a view, w/o using the difference
-    viewNormMeter = ClassAverageMeter(args, train_dataset.get_cls_num_dict())
-    for epoch in range(args.epochs):
-        loss, acc = train(
-            model, train_loader, 
-            criterion, optimizer, 
-            scheduler, args,
-            normMeter=normMeter,
-            simMeter=simMeter,
-            weightMeter=weightMeter,
-            viewNormMeter=viewNormMeter,
-            info_nce=info_nce)
-        print(f'Epoch {epoch} Average Loss: {loss:.4f} Top1: {acc:.4f}')
-        trainLosses.append(loss)
-        trainAccs.append(acc)
+    trainingTime = 0  # Total training time over all epochs
 
-        # Save model 
-        save_checkpoint({
-            'state_dict': model.state_dict(),
-            'epoch': epoch,
-            'optimizer': optimizer.state_dict(),
-            'arch': args.arch,
-        }, filename='runs/checkpoint.pth.tar')
-        # Update values we're tracking
-        update_meters(normMeter, simMeter, viewNormMeter, weightMeter)
+        normMeter = ClassAverageMeter(args, train_dataset.get_cls_num_dict())
+        simMeter = ClassAverageMeter(args, train_dataset.get_cls_num_dict())
+        weightMeter = ClassAverageMeter(args, train_dataset.get_cls_num_dict())
+        # Measure the embeddings of a view, w/o using the difference
+        viewNormMeter = ClassAverageMeter(args, train_dataset.get_cls_num_dict())
 
-        plot(trainLosses)
-        plot(trainAccs,title='Training Accuracies', ylabel='Accuracy', filename='imgs/accuracies.png')
-        plot_category(normMeter.get_values(), ylabel=r'$d_i$', title=f'Norm difference between positive views.', epoch=epoch, filename='imgs/norm_difference.png')
-        plot_category(simMeter.get_values(), 
-                ylabel='Cosine Similarity', title='Cosine Similarity between corresponding views.', 
-                epoch=epoch,
-                filename='imgs/cosine_sims.png')
-        plot_category(viewNormMeter.get_values(), ylabel=r'$\|z_i\|$', 
-                title='Norm of single branch embeddings.', epoch=epoch, 
-                filename='imgs/singleViewNorm.png')
-        plot_category(weightMeter.get_values(), ylabel=r'$w_i$', 
-                title='Weight per category', epoch=epoch,
-                filename='imgs/weights.png')
+        normMeter = ClassAverageMeter(args, train_dataset.get_cls_num_dict())
+        simMeter = ClassAverageMeter(args, train_dataset.get_cls_num_dict())
+        for epoch in range(args.epochs):
+            loss, acc, time = train(
+                model, train_loader, 
+                criterion, optimizer, 
+                scheduler, args,
+                normMeter=normMeter,
+                simMeter=simMeter,
+                weightMeter=weightMeter,
+                viewNormMeter=viewNormMeter,
+                info_nce=info_nce)
+           
+            print(f'Epoch {epoch} Average Loss: {loss:.4f} Top1: {acc:.4f} Time: {time:.4f}')
+            trainLosses.append(loss)
+            trainAccs.append(acc)
+            trainingTime += time
 
-        plot_by_class(normMeter.get_values(), ylabel=r'$d_i$', title=f'Representation norm by class', epoch=epoch,
-                filename='imgs/norm_difference_class.png')
-        plot_by_class(simMeter.get_values(), ylabel=f'cosine similarity', title=f'Cosine similarity', epoch=epoch,
-                filename='imgs/cosine_similarity_class.png')
-        plot_by_class(viewNormMeter.get_values(), ylabel='Class Norm', title=f'Single view norm by class', epoch=epoch,
-                filename='imgs/singleViewNorm_class.png')
-        plot_by_class(weightMeter.get_values(), ylabel=r'$w_i$', title=f'Weights per class', epoch=epoch,
-                filename='imgs/weights_class.png')
+            # Save model 
+            save_checkpoint({
+                'state_dict': model.state_dict(),
+                'epoch': epoch,
+                'optimizer': optimizer.state_dict(),
+                'arch': args.arch,
+            }, filename='runs/checkpoint.pth.tar')
 
+            # Update values we're tracking
+            update_meters(normMeter, simMeter, weightMeter, viewNormMeter)
+            update_meters(normMeter, simMeter)
+
+            plot(trainLosses)
+            plot(trainAccs,title='Training Accuracies', ylabel='Accuracy', filename='imgs/accuracies.png')
+            plot_category(normMeter.get_values(), ylabel=r'$d_i$', title=f'Norm difference between positive views.', epoch=epoch, filename='imgs/norm_difference.png')
+            plot_category(simMeter.get_values(), 
+                    ylabel='Cosine Similarity', title=f'{args.dataset} Cosine Similarity between corresponding views.', 
+                    epoch=epoch,
+                    filename='imgs/cosine_sims.png')
+            plot_category(weightMeter.get_values(), 
+                    ylabel='weight', title=f'{args.dataset} Weights per cateogry', 
+                    epoch=epoch, filename='imgs/weights.png')
+            plot_category(viewNormMeter.get_values(), ylabel=r'$\|z_i\|$', 
+                    title='Norm of single branch embeddings.', epoch=epoch, 
+                    filename='imgs/singleViewNorm.png')
         
     print(args)
+    print(f'Total training time: {trainingTime}')
 if __name__ == '__main__':
     main()

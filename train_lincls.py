@@ -58,7 +58,7 @@ def get_latest_class_distribution(args, path=None):
 
 def main():
     args = parser.parse_args()
-    device = 'cuda' if torch.cuda.is_available() else 'cpu'
+    device = 'cuda:1' if torch.cuda.is_available() else 'cpu'
     class_dist = get_latest_class_distribution(args) 
     
     if args.arch == 'resnet18':
@@ -66,9 +66,8 @@ def main():
     elif args.arch == 'resnet50':
         model = models.resnet50(pretrained=False, num_classes=args.num_classes)
     if args.checkpoint != '':
-        checkpoint = torch.load('runs/checkpoint.pth.tar')
+        checkpoint = torch.load(args.checkpoint, map_location=device)
         state_dict = checkpoint['state_dict']
-    
     
     # Freeze the parameters except for last linear layer
     for k in list(state_dict.keys()):

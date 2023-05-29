@@ -47,17 +47,14 @@ class BalancedCIFAR10(torchvision.datasets.CIFAR10):
 # Taken from https://github.com/Liuhong99/Imbalanced-SSL/blob/main/cifar/imbalance_cifar.py
 class ImbalanceCIFAR10(torchvision.datasets.CIFAR10):
     cls_num = 10
-
     def __init__(self, root, imb_type='exp', imb_factor=0.01, rand_number=0, train=True,
                  transform=None, target_transform=None, download=False, shuffleClasses=True):
         super(ImbalanceCIFAR10, self).__init__(root, train, transform, target_transform, download)
         img_num_list = self.get_img_num_per_cls(self.cls_num, imb_type, imb_factor)
-        print(img_num_list)
         self.imb_factor = imb_factor
         self.shuffleClasses = shuffleClasses
         self.gen_imbalanced_data(img_num_list)
         self.img_num_list = img_num_list
-        self.cls_num = 10 
 
     def get_img_num_per_cls(self, cls_num, imb_type, imb_factor):
         img_max = len(self.data) / cls_num
@@ -99,10 +96,9 @@ class ImbalanceCIFAR10(torchvision.datasets.CIFAR10):
         np.save(f'splits/cifar{self.cls_num}_imb.npy', np.array(self.targets))
 
     def get_cls_num_dict(self):
-        #cls_num_list = []
+        #cls_num_dict = {}
         #for i in range(self.cls_num):
-        #    cls_num_list.append(self.num_per_cls_dict[i])
-        #return cls_num_list
+        #    cls_num_dict[i] = self.num_per_cls_dict[i]
         return self.num_per_cls_dict
 
     def __getitem__(self, idx):
@@ -116,7 +112,6 @@ class ImbalanceCIFAR10(torchvision.datasets.CIFAR10):
         return [x1, x2], target
 
 class ImbalanceCIFAR100(ImbalanceCIFAR10):
-    cls_num = 100
     base_folder = 'cifar-100-python'
     url = "https://www.cs.toronto.edu/~kriz/cifar-100-python.tar.gz"
     filename = "cifar-100-python.tar.gz"
@@ -133,10 +128,11 @@ class ImbalanceCIFAR100(ImbalanceCIFAR10):
         'key': 'fine_label_names',
         'md5': '7973b15100ade9c7d40fb424638fde48',
     }
+    cls_num = 100
 
 if __name__=='__main__':
     trainaugs, testaugs = get_transforms()
     dataset = ImbalanceCIFAR100(root='../datasets', 
                             train=True, 
                             transform=trainaugs)
-    print(dataset.img_num_list)
+    print(dataset.get_cls_num_dict())
