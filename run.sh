@@ -5,10 +5,9 @@ python train.py \
 	--batch-size 512 \
 	--dataset cifar10 \
 	--num-classes 10 \
-	--optimizer adam \
-	--lr 3e-4 \
+	--optimizer sgd \
+	--lr 0.4 \
 	--encoder_dim 512 \
 	--temperature 0.2 \
 	--proj_hid_dim 128 \
-	--resume runs/cifar10_orig_proj400.pth.tar \
-	--epochs  800 \
+	--epochs  1200 \
