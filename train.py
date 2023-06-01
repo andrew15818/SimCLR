@@ -230,10 +230,10 @@ def main():
                 ylabel='Cosine Similarity', title=f'{args.dataset} Cosine Similarity between corresponding views.', 
                 epoch=epoch,
                 filename='imgs/cosine_sims_class.png')
-        plot_category(weightMeter.get_values(), 
+        plot_by_class(weightMeter.get_values(), 
                 ylabel='weight', title=f'{args.dataset} Weights per cateogry', 
                 epoch=epoch, filename='imgs/weights_class.png')
-        plot_category(viewNormMeter.get_values(), ylabel=r'$\|z_i\|$', 
+        plot_by_class(viewNormMeter.get_values(), ylabel=r'$\|z_i\|$', 
                 title='Norm of single branch embeddings.', epoch=epoch, 
                 filename='imgs/singleViewNorm_class.png')
 
