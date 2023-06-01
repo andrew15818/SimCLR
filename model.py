@@ -21,10 +21,8 @@ class SimCLR(torch.nn.Module):
         
         self.projector = torch.nn.Sequential(
             nn.Linear(self.encoder_dim, proj_hid_dim),
-            nn.BatchNorm1d(proj_hid_dim),
-            nn.Linear(proj_hid_dim, proj_hid_dim, bias=False),
-            nn.BatchNorm1d(proj_hid_dim),
-            nn.ReLU(inplace=True)
+            nn.ReLU(inplace=True),
+            nn.Linear(proj_hid_dim, proj_hid_dim),
         )
 
     def forward(self, x):
