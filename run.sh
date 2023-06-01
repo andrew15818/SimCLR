@@ -5,8 +5,9 @@ python train.py \
 	--batch-size 512 \
 	--dataset cifar10 \
 	--num-classes 10 \
-	--optimizer sgd \
-	--lr 0.4 \
+	--optimizer adam \
+	--lr 3e-4 \
+	--shuffle-classes \
 	--encoder_dim 512 \
 	--temperature 0.2 \
 	--proj_hid_dim 128 \
