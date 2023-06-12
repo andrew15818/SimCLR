@@ -9,7 +9,7 @@ import torch.optim as optim
 from models.model import SimCLR
 from models.sdclr import SDCLR
 from models.resnet_prune_multibn import prune_resnet18_dual
-from data import ImbalanceCIFAR10_index, ImbalanceCIFAR100_index
+from data.data import ImbalanceCIFAR10_index, ImbalanceCIFAR100_index
 from utils import * 
 
 import argparse
@@ -67,7 +67,7 @@ def save_results(args, cat_accs, testClassAccs):
 def main():
    
     args = parser.parse_args()
-    device = 'cuda:1' if torch.cuda.is_available() else 'cpu'
+    device = 'cuda:0' if torch.cuda.is_available() else 'cpu'
     
     # Load the dataset -- balanced
     if args.dataset == 'cifar10':
@@ -88,9 +88,9 @@ def main():
     #                        kernel_size=3, stride=1)
     checkpoint = torch.load(args.checkpoint, map_location=device)
     state_dict = checkpoint['state_dict']
-    print(f"Model trained for {checkpoint['epochs']} epochs")
+    #print(f"Model trained for {checkpoint['epochs']} epochs")
     
-    if args.baseline or args.ours:
+    if args.baseline or args.ours or args.bcl:
         encoder_name = 'encoder'
         # Load the model
         model = models.resnet18(pretrained=False, num_classes=args.num_classes)
