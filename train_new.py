@@ -8,7 +8,8 @@ import argparse
 import os
 import wandb
 
-from data import ImbalanceCIFAR10_index, ImbalanceCIFAR100_index, get_transforms
+from data.data import (ImbalanceCIFAR10_index, ImbalanceCIFAR100_index, 
+                       BalancedCIFAR10, get_transforms)
 from models.model import SimCLR
 from models.sdclr import SDCLR
 from criterion import nt_xent
@@ -43,11 +44,11 @@ parser.add_argument('--encoder_dim', type=int, default=512,
 parser.add_argument('--temperature', type=float, default=0.2,
                    help='Temperature in the loss function.')
 parser.add_argument('--optimizer', type=str, default='adam')
-parser.add_argument('--lr', type=float, default=3e-4,
+parser.add_argument('--lr', type=float, default=1e-3,
                    help='initial learning rate.')
 parser.add_argument('--momentum', type=float, default=0.9,
                    help='Momentum')
-parser.add_argument('--weight_decay', type=float, default=5e-4,
+parser.add_argument('--weight_decay', type=float, default=1e-4,
                    help='weight decay')
 parser.add_argument('--bcl', action='store_true', default=False,
                    help='Train boosted contrastive learning')
@@ -57,10 +58,24 @@ parser.add_argument('--ours', action='store_true', default=False,
                    help='Whether to use our model.')
 parser.add_argument('--baseline',  action='store_true', default=False,
                    help='Test a baseline Simclr.')
+parser.add_argument('--balanced', action='store_true', default=False,
+                   help='Use the original cifar dataset.')
+#model_names = sorted(name for name in models.__dict__
+#                    if name.islower() and not name.startswith('__')
+#                    and callable(models.__dict__[name]))
 
+def cosine_annealing(step, total_steps, lr_max, lr_min, warmup_steps=0):
+    assert warmup_steps >= 0
+    if step <= warmup_steps:
+        lr = lr_max * step / warmup_steps
+    else:
+        lr = lr_min + (lr_max - lr_min) * 0.5 * (1 + np.cos((step - warmup_steps)/ (total_steps - warmup_steps) * np.pi))
+    return lr
 def get_weights(z, **kwargs):
     # temporary
-    return torch.ones_like(z).detach()
+    mean = z.mean()
+    w = 1 - ((z - mean) / (z.max() - z.min()))
+    return w
 
 # Train one epoch
 def train(
@@ -75,14 +90,15 @@ def train(
         
         z1 = model(x1)
         z2 = model(x2)
-        
-        logits, labels = contrastive(z1, z2)
         norms = torch.norm(z1 - z2, p=2, dim=1)
+        logits, labels = contrastive(z1, z2)
+        
        
         if args.ours:
             w = get_weights(norms)
             loss = torch.mean(criterion(logits, labels) * 
                               torch.cat([w, w],dim=0))
+            kwargs['weightMeter'].add_batch_value(norms, targets)
         else:
             loss = torch.mean(criterion(logits, labels))
             
@@ -104,7 +120,12 @@ def main():
     train_transforms, test_transforms = get_transforms()
     # Load the dataset
     if args.dataset == 'cifar10':
-        dataset = ImbalanceCIFAR10_index(root=args.data_dir, train=True, 
+        if args.balanced:
+            dataset = BalancedCIFAR10(root=args.data_dir, train=True,
+                                     transform=train_transforms)
+            print(f'Length of the balanced dataset: {len(dataset)}')
+        else:
+            dataset = ImbalanceCIFAR10_index(root=args.data_dir, train=True, 
                                          transform=train_transforms, split_num=args.split,
                                         imb_ratio=args.imb_ratio)
         args.num_classes = 10
@@ -119,8 +140,7 @@ def main():
     if args.sdclr:
         model = SDCLR(num_class=args.encoder_dim, network=args.model)
     else:
-        if args.model == 'resnet18':
-            encoder = models.resnet18
+        encoder = models.__dict__[args.model]
         # Load our own model
         model = SimCLR(base_encoder=encoder, encoder_dim=args.encoder_dim, proj_hid_dim=128)
         
@@ -129,15 +149,17 @@ def main():
     if args.optimizer == 'adam':
         optimizer = optim.Adam(model.parameters(), lr=args.lr, weight_decay=args.weight_decay)
     else:
-        optimizer = optim.SGD(model.parameters(), lr=args.lr, momentum=args.momentum)
+        optimizer = optim.SGD(model.parameters(), lr=args.lr, weight_decay=args.weight_decay, momentum=args.momentum)
         
-    scheduler = optim.lr_scheduler.CosineAnnealingLR(optimizer, T_max=len(train_loader))
+    #scheduler = optim.lr_scheduler.CosineAnnealingLR(optimizer, T_max=len(train_loader))
+    scheduler = optim.lr_scheduler.LambdaLR(optimizer, lr_lambda=lambda step: cosine_annealing(step, args.epochs * len(train_loader), 1, 1e-6/args.lr, warmup_steps=10*len(train_loader)))
     # Criterion
     contrastive = nt_xent(args.temperature)
     criterion = nn.CrossEntropyLoss(reduction='none')
     
     # Initialize weights and biases
-    method = 'sdclr' if args.sdclr else 'ours' if args.ours else 'baseline' if args.baseline else 'bcl'
+    method = 'sdclr' if args.sdclr else 'ours' if args.ours else 'baseline' 
+    
     # Name of the directory to save
     save_dir = f'{args.experiment}/{method}_{args.dataset}_{args.model}_ratio{args.imb_ratio}_split{args.split}'
     print(f'Saving at {save_dir}')
@@ -155,14 +177,16 @@ def main():
     #    }
     #)
     normMeter = ClassAverageMeter(args, dataset.get_sample_dist())
+    weightMeter = ClassAverageMeter(args, dataset.get_sample_dist())
     losses = []
     model.train()
     for epoch in range(1, args.epochs):
         epoch_loss = train(model, train_loader, optimizer, 
               contrastive, criterion, 
               scheduler, args,
-             normMeter=normMeter)
-        print(f'Epoch {epoch}: Loss {epoch_loss:.4f}')
+             normMeter=normMeter,
+             weightMeter=weightMeter)
+        print(f'Epoch {epoch}: Loss {epoch_loss:.4f}, lr: {scheduler.get_lr()}')
         losses.append(epoch_loss)
         normMeter.update()
         
@@ -175,6 +199,16 @@ def main():
                         filename='imgs/norm_difference_class.png')
         
         plot(losses, title='Losses')
+        if args.ours:
+            weightMeter.update()
+            plot_category(weightMeter.get_values(), epoch=epoch,
+                    ylabel='Weights per category',
+                    title='Weights',
+                    filename='imgs/weights.png')
+            plot_by_class(weightMeter.get_values(), epoch=epoch,
+                    title='Weights',
+                    ylabel='Weights per class.',
+                    filename='imgs/weights_class.png')
         # Save the model
         state_dict = {
                 'state_dict': model.state_dict(),
