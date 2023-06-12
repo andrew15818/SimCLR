@@ -77,7 +77,7 @@ def plot_category(values, epoch=0,
     for category, bounds in categories.items():
         start, end = bounds
         category_values = list(values.keys())[start:end]
-        avg = np.zeros((epoch+1))
+        avg = np.zeros((epoch))
         for classid in category_values:
             avg += values[classid] 
         avg /= (end - start)
@@ -159,9 +159,9 @@ class AverageMeter(object):
         self.count += n
         self.avg = self.sum / self.count
 
-    #def __str__(self):
-    #    fmtstr = '{name} {val' + self.fmt + '} ({avg' + self.fmt + '})'
-    #    return fmtstr.format(**self.__dict__)
+    def __str__(self):
+        fmtstr = '{name} {val' + self.fmt + '} ({avg' + self.fmt + '})'
+        return fmtstr.format(**self.__dict__)
 
 
 # Measure some value per class during training
