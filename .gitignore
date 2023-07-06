@@ -1,5 +1,6 @@
 imgs/
 runs/
+wandb/
 # Any misc. notebooks not relevant to the main model
 *.ipynb
 
