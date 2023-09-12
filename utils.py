@@ -25,6 +25,23 @@ def accuracy(output, target, topk=(1,)):
             res.append(correct_k.mul_(100.0 / batch_size))
         return res
 
+def cosine_annealing(step, total_steps, lr_max, lr_min, warmup_steps=0):
+    assert warmup_steps >= 0
+
+    if step < warmup_steps:
+        lr = lr_max * step / warmup_steps
+    else:
+        lr = lr_min + (lr_max - lr_min) * 0.5 * (1 + np.cos((step - warmup_steps) / (total_steps - warmup_steps) * np.pi))
+
+    return lr
+
+def save_checkpoint(state_dict, save_dir, filename):
+    if not os.path.exists(save_dir):
+        print(f'Making directory {save_dir}')
+        os.makedirs(save_dir)
+    print(f'Saving file at {os.path.join(save_dir, filename)}')
+    torch.save(state_dict, os.path.join(save_dir, filename))
+ 
 def plot(values,
         title='Loss',
         ylabel='Loss',

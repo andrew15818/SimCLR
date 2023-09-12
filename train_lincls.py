@@ -1,189 +1,198 @@
 import torch
 import torch.nn as nn
-import torch.optim as optim
-import torchvision.models as models
-import torchvision.transforms as transforms
+from models.resnet import resnet18,resnet50
+#import torchvision.models as models
 import torchvision.datasets as datasets
-import numpy as np
-
+import torchvision.transforms as transforms
 from torch.utils.data import DataLoader
-from model import SimCLR
-from utils import *
-from collections import defaultdict
+import torch.optim as optim
 
-import os
+from models.model import SimCLR
+from models.sdclr import SDCLR
+from models.resnet_prune_multibn import prune_resnet18_dual
+from data.data import ImbalanceCIFAR10_index, ImbalanceCIFAR100_index
+from utils import * 
+
 import argparse
+import os
+import numpy as np
+import matplotlib.pyplot as plt
 
 parser = argparse.ArgumentParser()
-parser.add_argument('--data_dir', type=str, default='../datasets',
-    help='Path to the dataset.')
-parser.add_argument('--arch', type=str, default='resnet18', 
-    help='backbone architecture')
-parser.add_argument('--dataset_name', type=str, default='cifar10')
-parser.add_argument('--epochs', type=int, default=90, 
-    help='Epochs to train a linear classifier on top of the representaitons.')
+parser.add_argument('--data_dir', type=str, default='../datasets')
+parser.add_argument('--checkpoint', type=str, default='./model.pth.tar', 
+                   help='Path to pretrained model')
+parser.add_argument('--arch', type=str, default='resnet18',
+                   help='backbone architecture')
+parser.add_argument('--dataset', type=str, default='cifar10', choices=['cifar100', 'cifar10'])
+parser.add_argument('--split', type=int, default=1, choices=[1, 2, 3], 
+                   help='Data split to load')
+parser.add_argument('--ours', action='store_true', default=False,
+                   help='Use our method')
+parser.add_argument('--imb_ratio', type=int, default=100,
+                   help='Imbalance ratio used during training')
+parser.add_argument('--baseline', action='store_true', default=False,
+                    help='Baseline SimCLR')
+parser.add_argument('--sdclr', action='store_true', default=False,
+                   help='Self-damaging contrastive learning')
+parser.add_argument('--bcl', action='store_true', default=False,
+                   help='Boosted Contrastive Learning')
+parser.add_argument('--batch_size', type=int, default=512)
+parser.add_argument('--optimizer', type=str, default='adam')
 parser.add_argument('--lr', type=float, default=3e-4)
-parser.add_argument('--checkpoint', type=str, default='',
-    help='path to pretrained checkpoint')
-parser.add_argument('--batch_size', type=int, default=256)
-parser.add_argument('--out_dim',type=int, default=512,
-    help='Output of the encoder backbone.')
-parser.add_argument('--num_classes', type=int, default=10)
+parser.add_argument('--epochs', type=int, default=90,
+                   help='Epochs to fine-tune the classifier.')
 
-def accuracy(output, target, topk=(1,)):
-    """Computes the accuracy over the k top predictions for the specified values of k"""
-    with torch.no_grad():
-        maxk = max(topk)
-        batch_size = target.size(0)
-
-        _, pred = output.topk(maxk, 1, True, True)
-        pred = pred.t()
-        correct = pred.eq(target.view(1, -1).expand_as(pred))
-
-        res = []
-        for k in topk:
-            correct_k = correct[:k].reshape(-1).float().sum(0, keepdim=True)
-            res.append(correct_k.mul_(100.0 / batch_size))
-        return res
-
-#Open the file with the latest class distribution
-def get_latest_class_distribution(args, path=None):
-    targets = np.load(f'splits/{args.dataset_name}_imb.npy')
+def get_class_dist(args):
+    targets = np.load(f'splits/{args.dataset}_split{args.split}_imbfac{args.imb_ratio}_targets.npy')
     class_dist = {}
+    print(f'Loading split {args.split}')
     for i in range(args.num_classes):
-        class_count = np.count_nonzero(targets == i)
-        class_dist[i] = class_count
-    print(class_dist)
+        class_dist[i] = np.count_nonzero(targets == i)
+        
     return class_dist
 
-def main():
-    args = parser.parse_args()
-    device = 'cuda' if torch.cuda.is_available() else 'cpu'
-    class_dist = get_latest_class_distribution(args) 
-    
-    if args.arch == 'resnet18':
-        model = models.resnet18(pretrained=False, num_classes=args.num_classes)
-    elif args.arch == 'resnet50':
-        model = models.resnet50(pretrained=False, num_classes=args.num_classes)
-    if args.checkpoint != '':
-        checkpoint = torch.load('runs/checkpoint.pth.tar')
-        state_dict = checkpoint['state_dict']
-    
-    
-    # Freeze the parameters except for last linear layer
-    for k in list(state_dict.keys()):
-        if k.startswith('encoder') and not k.startswith('encoder.fc'):
-            state_dict[k[len('encoder.'):]] = state_dict[k]
-        del state_dict[k]
 
-    # Change the first conv layer to be able to load the state_dict
-    model.conv1 = nn.Conv2d(in_channels=3, out_channels=64,
-            kernel_size=3, stride=1)
+# Write the final accuracies to a file
+def save_results(args, cat_accs, testClassAccs):
+    save_dir = '/'.join(i for i in args.checkpoint.split('/')[:-1])
+    filename = os.path.join(save_dir, 'results.txt')
+    with open(filename, 'w') as f:
+        f.write(f'Using split {args.split}\n')
+        f.write(f'Category accs: {cat_accs}')
+        f.write('\n')
+        f.write(f'Per class Accs{testClassAccs}')
+        f.write('\n')
+    f.close()
+    
+def main():
+   
+    args = parser.parse_args()
+    device = 'cuda:0' if torch.cuda.is_available() else 'cpu'
+    
+    # Load the dataset -- balanced
+    if args.dataset == 'cifar10':
+        train_dataset = datasets.CIFAR10(root=args.data_dir, train=True, transform=transforms.ToTensor())
+        test_dataset = datasets.CIFAR10(root=args.data_dir, train=False, transform=transforms.ToTensor())
+        args.num_classes = 10
+    elif args.dataset == 'cifar100':
+        train_dataset = datasets.CIFAR10(root=args.data_dir, train=True, transform=transforms.ToTensor())
+        test_dataset = datasets.CIFAR10(root=args.data_dir, train=False, transform=transforms.ToTensor())
+        args.num_classes100
+    
+    train_loader = DataLoader(train_dataset, batch_size=args.batch_size, shuffle=True)
+    test_loader = DataLoader(test_dataset, batch_size=args.batch_size, shuffle=True)
+    
+    ## Load the model
+    #model = resnet18(pretrained=False, num_classes=args.num_classes)
+    #model.conv1 = nn.Conv2d(in_channels=3, out_channels=64, 
+    #                        kernel_size=3, stride=1)
+    checkpoint = torch.load(args.checkpoint, map_location=device)
+    state_dict = checkpoint['state_dict']
+    #print(f"Model trained for {checkpoint['epochs']} epochs")
+    
+    if args.baseline or args.ours or args.bcl:
+        encoder_name = 'encoder'
+        # Load the model
+        model = resnet18(pretrained=False, num_classes=args.num_classes)
+        model.conv1 = nn.Conv2d(in_channels=3, out_channels=64, 
+                            kernel_size=3, stride=1, bias=False)
+        #model.normalize = nn.Identity()
+    elif args.sdclr:
+        encoder_name = 'backbone'
+        model = prune_resnet18_dual(pretrained=False, num_classes=args.num_classes)
+        
+    for k in list(state_dict.keys()):
+        if k.startswith(encoder_name) and not k.startswith(f'{encoder_name}.fc'):
+            state_dict[k[len(f'{encoder_name}.'):]] = state_dict[k]
+        del state_dict[k]
+    
     log = model.load_state_dict(state_dict, strict=False)
+    print(log)
     assert log.missing_keys == ['fc.weight', 'fc.bias']
-    # Only train the last layer
+    
     for name, param in model.named_parameters():
         if name not in ['fc.weight', 'fc.bias']:
             param.requires_grad = False
-    
-    parameters = list(filter(lambda p: p.requires_grad, model.parameters())) 
+    parameters = list(filter(lambda p: p.requires_grad, model.parameters()))
     assert len(parameters) == 2
     model.to(device)
-    print(model)
-    # Train, test on balanced datasets
-    if args.dataset_name == 'cifar10':
-        train_dataset = datasets.CIFAR10(root=args.data_dir, train=True, transform=transforms.ToTensor())
-        test_dataset = datasets.CIFAR10(root=args.data_dir, train=False, transform=transforms.ToTensor())
-    elif args.dataset_name == 'cifar100':
-        train_dataset = datasets.CIFAR100(root=args.data_dir, train=True, transform=transforms.ToTensor())
-        test_dataset = datasets.CIFAR100(root=args.data_dir, train=False, transform=transforms.ToTensor())
-    train_loader = DataLoader(train_dataset, shuffle=True, batch_size=args.batch_size)
-    test_loader = DataLoader(test_dataset, shuffle=True, batch_size=args.batch_size)
-
-    optimizer = optim.Adam(model.parameters(), lr=args.lr, weight_decay=0.0008)
-    criterion = torch.nn.CrossEntropyLoss().to(device)
     
-    # Just one number since the datasets are balanced and contain equal number of samples/class
-    trainClassCounts = len(train_loader.dataset) / args.num_classes
-    testClassCounts = len(test_loader.dataset) / args.num_classes
-    print(trainClassCounts, testClassCounts)
-    cumClassAccs = defaultdict(list)
+    # Load the optimizer
+    optimizer = optim.Adam(model.parameters(), lr=args.lr)
+    criterion = nn.CrossEntropyLoss().to(device)
+    
+    # Class distribution according to split
+    class_dist = get_class_dist(args)
+    latestClassAccs = None
     for epoch in range(args.epochs):
         lossMeter = AverageMeter('Loss')
         trainTop1 = AverageMeter('Train Top 1')
-        testTop1 = AverageMeter('Test Top 1')
+        testTop1 = AverageMeter('Test top 1')
         testTop5 = AverageMeter('Test top 5')
         trainClassAccs = defaultdict(int)
         testClassAccs = defaultdict(int)
         
-        # Train
         model.train()
         for i, (imgs, targets) in enumerate(train_loader):
             imgs = imgs.to(device)
             targets = targets.to(device)
-            
             logits = model(imgs)
             loss = criterion(logits, targets)
+            lossMeter.update(loss.item())
             top1 = accuracy(logits, targets, topk=(1,))
             trainTop1.update(top1[0].item())
-            lossMeter.update(loss.item())
             optimizer.zero_grad()
             loss.backward()
             optimizer.step()
             
-            # Measure how many we got right
-            preds = torch.argmax(logits, dim=1)
-            for i in range(targets.shape[0]):
-                if preds[i].item() == targets[i].item():
-                    trainClassAccs[targets[i].item()] += 1
-        
-        # Test
         model.eval()
         for i, (imgs, targets) in enumerate(test_loader):
             imgs = imgs.to(device)
             targets = targets.to(device)
-
             logits = model(imgs)
-
-            top1, top5 = accuracy(logits, targets, topk=(1,5))
-            testTop1.update(top1.item())
-            testTop5.update(top5.item())
+            top = accuracy(logits, targets, topk=(1, 5))
+            testTop1.update(top[0].item())
+            testTop5.update(top[1].item())
             
-            # Measure how many we got right
+            # Record per-class accuracies
             preds = torch.argmax(logits, dim=1)
-            for i in range(targets.shape[0]):
-                if preds[i].item() == targets[i].item():
-                    testClassAccs[targets[i].item()] += 1
-        for (trid, trcor), (teid, tecor) in zip(trainClassAccs.items(), testClassAccs.items()):
-            trainClassAccs[trid] = trcor / trainClassCounts
-            testClassAccs[teid] = tecor / testClassCounts
-        print(f'Epoch {epoch} Train loss: {lossMeter.avg:.4f}  Train Top1: {trainTop1.avg:.4f} \
-        Test Top 1: {testTop1.avg:.4f} \
-        Test Top5: {testTop5.avg:.4f}')
-        # Print based on category
-        print_category_accs(trainClassAccs, testClassAccs, class_dist, args)
+            for j in range(targets.shape[0]):
+                if preds[j].item() == targets[j].item():
+                    testClassAccs[targets[j].item()] += 1
+                    
+        print(f"Epoch {epoch} Loss: {lossMeter.avg:.4f} Train Top1 : {trainTop1.avg:.4f}",
+        f"Test Top1: {testTop1.avg:.4f} Test Top 5: {testTop5.avg:.4f}")
+        cat_accs = print_category_accs(class_dist, testClassAccs, test_loader, args)
+        latestClassAccs = testClassAccs
+    print(latestClassAccs)
+    save_results(args, cat_accs, latestClassAccs)
         
-    print(f'{sorted(testClassAccs.items(), key=lambda t: t[0])}')
-
-# Order by Many, Medium, Few
-def print_category_accs(trainAccs:dict, testAccs:dict, class_dist:dict, args):
-    # Collect all the ordered accs into lists for easy index
-    trainValues, testValues = [], []
-    #print('Appending...')
-    # At least one class has 0 acc, fill it in 
-    if len(testAccs.keys()) != args.num_classes:
-        for i in range(args.num_classes):
-            if i not in testAccs:
-                testAccs[i] = 0
-        print(f'Fixed length to {len(list(testAccs.keys()))}')
-
-    for classId, classCount in sorted(class_dist.items(), key=lambda t: t[1], reverse=True):
-        #print(f'{classId}, ', end='')
-        testValues.append(testAccs[classId])
-
-    interval = args.num_classes // 3
-    tv = np.array(testValues)
-    #print(f'Many: 0-{interval} Medium: {interval}:{2*interval+1} Few: {2*interval+1}:{args.num_classes}')
-    print(f'\tMany: {np.mean(tv[0:interval]):.4f}, Medium:{np.mean(tv[interval:2*interval+1]):.4f}, Few: {np.mean(tv[2*interval+1:]):.4f}')
+def print_category_accs(class_dist, test_accs, test_loader, args):
+    imgs_per_class = len(test_loader.dataset) / args.num_classes
+    if args.dataset == 'cifar10':
+        cat_indices = {'Many': [0, 3],
+                      'Medium': [3, 7],
+                      'Few': [7, 10]}
+    elif args.dataset == 'cifar100':
+        cat_indices = {'Many': [0, 33],
+                      'Medium': [33, 67],
+                      'Few': [67, 100]}
+    many_acc, med_acc, few_acc = 0, 0, 0
+    for i, (classid, _) in enumerate(sorted(class_dist.items(), key=lambda p:p[1], reverse=True)):
+        if i >= cat_indices['Many'][0] and i < cat_indices['Many'][1]:
+            many_acc += (test_accs[classid] / imgs_per_class)
+        elif i >= cat_indices['Medium'][0] and i < cat_indices['Medium'][1]:
+            med_acc += (test_accs[classid] / imgs_per_class)
+        elif i >= cat_indices['Few'][0] and i < cat_indices['Few'][1]:
+            few_acc += (test_accs[classid] / imgs_per_class)
+            
+    many_acc /= cat_indices['Many'][1] - cat_indices['Many'][0]
+    med_acc /= cat_indices['Medium'][1] - cat_indices['Medium'][0]
+    few_acc /= cat_indices['Few'][1] - cat_indices['Few'][0]
+    
+    print(f'Many: {many_acc:.4f}\tMedium: {med_acc:.4f} Few: {few_acc:.4f}')
+    return {'Many': many_acc, 'Medium': med_acc, 'Few': few_acc}
+            
 if __name__ == '__main__':
     main()

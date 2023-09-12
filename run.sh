@@ -1,12 +1,16 @@
 #!/bin/bash
 python train.py \
-	--data-dir ../datasets \
-	--arch resnet18 \
-	--batch-size 512 \
+	hello_world  \
+	--data_dir ../datasets/ \
 	--dataset cifar10 \
-	--num-classes 10 \
-	--optimizer adam \
-	--lr .0003 \
-	--encoder_dim 512 \
-	--proj_hid_dim 128 \
+	--gpu 0 \
+	--save_freq 300 \
+	--model resnet18 \
+	--split 1 \
+	--batch_size 256 \
 	--epochs 1200 \
+	--encoder_dim 10 \
+	--temperature 0.2 \
+	--optimizer lars \
+	--ours \
+	--lr  0.5 \

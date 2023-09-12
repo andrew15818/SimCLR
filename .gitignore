@@ -6,5 +6,5 @@ wandb/
 splits/
 *.npy
 
-*pycache/
+**/__pycache__/
 old/
