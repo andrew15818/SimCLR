@@ -1,4 +1,3 @@
-imgs/
 runs/
 wandb/
 # Any misc. notebooks not relevant to the main model
@@ -7,4 +6,5 @@ wandb/
 splits/
 *.npy
 
-pycache/
+*pycache/
+old/
