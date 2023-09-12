@@ -40,6 +40,12 @@ Architecture | Encoder Output Dim. | Projector Otput Dim | Training Epochs | Acc
 ---|---|---|---|---|
 resnet18 | 512 | 128 | 100 | 79.838
 
+When testing on three splits of long-tailed CIFAR10 and CIFAR100, called CIFAR10-LT, and CIFAR100-LT, the results are as follows.
+
+![CIFAR10-LT](imgs/cifar10_accs.png "Mean accuracies and standard deviations on CIFAR10-LT. The columns represent the third of classes with most, medium, and least amount of training samples.")
+
+![CIFAR100-LT](imgs/cifar100_accs.png "Mean accuracies and standard deviations on CIFAR100-LT. The columns represent the third of classes with most, medium, and least amount of training samples.")
+
 ### SimCLR citation
 ```bibtex
 @article{chen2020simple,
