@@ -2,6 +2,8 @@
 
 ## Objective
 The objective of this repository is to train and evaluate various self-supervised learning (SSL) methods on long-tailed/imbalanced data.
+This is code used for my master's thesis (LoTaR below).
+
 SSL is usually implemented in two stages:
 
 ![SSL pipeline](./imgs/ssl_pipeline.png)
@@ -41,6 +43,11 @@ Architecture | Encoder Output Dim. | Projector Otput Dim | Training Epochs | Acc
 resnet18 | 512 | 128 | 100 | 79.838
 
 When testing on three splits of long-tailed CIFAR10 and CIFAR100, called CIFAR10-LT, and CIFAR100-LT, the results are as follows.
+For each split class indices ${1,\dots,C}$ are randomly shuffled and samples are chosen from the $i$-th class using an exponential distribution, leading to a long-tailed subset of the original dataset.
+Each model is then trained and evaluated on the same split, and this process is repeated three times.
+Below, we report the mean accuracies across splits and the standard deviation per category.
+"Many", "Medium", "Few" refer to the mean accuracies (and stdev) on the third of the classes with most,medium, and least training samples, respectively.
+The categories serve to indicate head/tail classes, and how performance changes as the amount of training samples per class decreases.
 
 ![CIFAR10-LT](imgs/cifar10_accs.png "Mean accuracies and standard deviations on CIFAR10-LT. The columns represent the third of classes with most, medium, and least amount of training samples.")
 
