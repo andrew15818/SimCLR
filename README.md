@@ -13,6 +13,13 @@ SSL is usually implemented in two stages:
 
 In this project, we use [SimCLR](https://arxiv.org/abs/2002.05709) as the base model in all the experiments. Also included is the code for Boosted Contrastive Learning [(BCL)](https://arxiv.org/abs/2205.12693) and Self-Damaging Contrastive Learning [(SDCLR)](https://arxiv.org/abs/2106.02990).
 
+## LoTaR
+The proposed architecture, **Lo**-ng **Ta**iled **R**eweighting (LoTaR), augments the contrastive loss function with the distance between positive view embeddings in SimCLR. The weight for the $i$-th sample, $w_i$, is given by 
+$$w_i=1+\frac{d_i-\bar{d}}{\max(\boldsymbol{d})-\min(\boldsymbol{d})},$$ 
+where $d_i$ is the distance between the positive views of a sample, and the array $\boldsymbol{d}$ are the distances for each sample in the batch. The architecture for LoTaR is given below.
+
+![Lotar architecture](imgs/lotar.png "Our approach directly modifies the loss function to increase the importance of what are believed to be tail-class samples based on the weight.")
+
 ## Training
 The file `train.py` contains the code necessary for training the base SimCLR model and LoTaR, the proposed approach in my thesis. The file will make a sub-directory in the `./runs` directory and will store the model as it trains. 
 
