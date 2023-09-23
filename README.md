@@ -31,18 +31,23 @@ CIFAR10/CIFAR100 are balanced datasets out-of-the-box, so previous papers sample
 We created three splits and are stored in the `spltis` folder.
 
 ### Imbalance Ratio
-The imbalance ratio indicates how long-tailed the dataset is. It is the ratio of the number of samples of the class  to the sample number of the class with the least samples.
+The imbalance ratio indicates how long-tailed the dataset is. It is the ratio of the sample number of the most frequent class and the least frequent class:
 
-$$\rho=\frac{\max(n_i)}{\min(n_j)},\quad i,j\in\{1,\dots,C\}$$
+$$\rho=\frac{\max(n_i)}{\min(n_j)},\quad i,j\in\{1,\dots,C\},$$
 where $n_{\{i,j\}}$ are the number of samples in classes $i$ and $j$, respectively.
 An imbalance ratio of 100 in this experiment means the largest class has 100x the samples of the smallest class (this is the default).
 
 ## Evaluating
-The `train_lincls.py` file takes the pre-trained model, and fine-tunes a single linear classification layer on top of the learned representations using the full, balanced CIFAR10/CIFAR100 training dataset. It freezes all the other layers, meaning it *only* trains the final fully-connected layer.
+
+![Evaluation Procedure acc. Kang et al.](imgs/evaluation.png "Detailed training/eval diagram")
+
+The `train_lincls.py` file takes the pre-trained model, and fine-tunes a single linear classification layer on top of the learned representations using the full, balanced CIFAR10/CIFAR100 training dataset. It freezes all the other layers, meaning it *only* trains the final fully-connected layer ([Kang et al.](https://openreview.net/forum?id=OqtLIabPTit)).
+This way, the performance of the final linear layer will depend on the quality of the representations learned by the encoder.
 
 It then evaluates the model on the balanced test set.
 Here you also have to indicate which split the model was trained on so we can get the sample distribution for that split and calculate the accuracies on head/tail classes.
 The result will be saved as `results.txt` in the same folder where the model was saved.
+
 
 ### Results
 Architecture | Encoder Output Dim. | Projector Otput Dim | Training Epochs | Acc.
